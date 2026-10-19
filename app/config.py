@@ -47,7 +47,7 @@ class Config:
         LLM_PROVIDER = "gemini"
 
     # Default model depending on provider
-    default_model = "gemini-2.0-flash" if LLM_PROVIDER == "gemini" else "gpt-4o-mini"
+    default_model = "gemini-3.8-flash" if LLM_PROVIDER == "gemini" else "gpt-4o-mini"
     LLM_MODEL = os.getenv("GEMINI_MODEL", "").strip() or os.getenv("LLM_MODEL", default_model).strip()
     LLM_BASE_URL = os.getenv("LLM_BASE_URL", "").strip() or None
 

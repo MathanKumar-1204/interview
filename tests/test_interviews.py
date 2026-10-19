@@ -106,3 +106,31 @@ def test_live_interview_page_renders(client, prepared_interview):
     assert "audioStatusPill" in html
     assert prepared_interview.candidate_name in html
 
+
+def test_interview_plan_schema_unwraps_nested_metadata():
+    from app.services.interview_planner import InterviewPlanSchema
+    nested_input = {
+        "interview_metadata": {
+            "job_title": "Senior Content Creator",
+            "key_responsibilities": ["Draft articles", "Manage calendar"]
+        },
+        "competencies": [
+            {
+                "competency_name": "Audience Research",
+                "weight": 50,
+                "goal": "Verify search intent proficiency"
+            },
+            {
+                "competency_name": "Brand Voice Adaptation",
+                "weight": 50,
+                "goal": "Verify tone adaptation across formats"
+            }
+        ]
+    }
+    plan = InterviewPlanSchema.model_validate(nested_input)
+    assert plan.job_title == "Senior Content Creator"
+    assert len(plan.required_competencies) == 2
+    assert plan.required_competencies[0].name == "Audience Research"
+    assert plan.required_competencies[0].weight == 50
+
+

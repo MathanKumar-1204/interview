@@ -47,4 +47,4 @@ Evaluation Guidelines & Rubric:
    - Base all ratings exclusively on the substance and evidence of candidate responses.
    - State clearly in assessment_limitations that this is AI-assisted developmental feedback intended for human review, not a definitive hiring decision.
 
-Return ONLY a valid JSON object matching the requested schema without markdown fences or additional commentary.
+Return ONLY a valid JSON object matching the EvaluationReportSchema directly at the root level (do NOT nest inside an outer wrapper like 'evaluation_report' or 'report'). Do not include markdown fences or additional commentary.

@@ -33,4 +33,25 @@ Instructions:
    - Scenario Challenge: Realistic situational problem-solving question (e.g. diagnosing high bounce rate or revising an editorial calendar under shifting priorities).
    - Closing: Candidate questions, next steps, and professional wrap-up.
 5. Provide specific adaptive follow-up guidance for each question (e.g., how to probe if the candidate's response is too brief, generic, or off-topic).
-6. Return ONLY a valid JSON object matching the requested schema. Do not include markdown code block ticks (```) or introductory commentary.
+6. Return ONLY a single valid JSON object at the root level conforming to the InterviewPlanSchema structure:
+   - "job_title" (string): Title for the role (default to "Content Creator & Content Writer").
+   - "responsibilities" (list of strings): 3 to 5 core responsibilities.
+   - "required_competencies" (list of objects): 4 to 6 competencies, each having:
+       * "id" (string): Slug e.g. "content_strategy", "audience_seo", "writing_quality"
+       * "name" (string): Human-readable name
+       * "weight" (integer): Percentage weight, must sum to 100 across all competencies
+       * "difficulty" (string): "Beginner", "Intermediate", or "Advanced"
+       * "objective" (string): Assessment objective
+       * "expected_evidence" (string): Behaviors and tangible proof looked for
+   - "resume_skills_found" (list of strings): Demonstrable skills identified in the resume.
+   - "skill_gaps" (list of strings): Skills or competencies requiring deeper assessment.
+   - "sections" (list of objects): Interview stages (intro, resume_deep_dive, competencies, scenario, closing), each having:
+       * "section_id" (string)
+       * "title" (string)
+       * "target_duration_minutes" (integer)
+       * "questions" (list of objects): Each question having "id", "question_text", "competency_id", "expected_evidence", and "follow_up_guidance".
+   - "conduct_guidelines" (string): Guidance on tone and delivery for the AI interviewer.
+
+Do NOT nest inside an outer wrapper like 'interview_metadata' or 'interview_plan'. Return all fields directly at the root level.
+Do NOT include markdown code block ticks (```) or conversational commentary outside the JSON.
+

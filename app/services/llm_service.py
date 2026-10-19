@@ -84,52 +84,69 @@ class LLMService:
 
         # Normalize model name if user entered e.g. "gemini-flash" or "gpt-4o"
         gemini_model = self.model
-        if "gpt" in gemini_model.lower():
-            gemini_model = "gemini-2.0-flash"
+        if "gpt" in gemini_model.lower() or gemini_model == "gemini-2.0-flash":
+            gemini_model = "gemini-3.8-flash"
         if not gemini_model.startswith("gemini-"):
             gemini_model = f"gemini-{gemini_model}"
 
-        try:
-            from google import genai
-            from google.genai import types
+        # Candidate models to attempt in order if a 404 deprecation occurs
+        candidate_models = [gemini_model]
+        for fallback in ("gemini-3.8-flash", "gemini-2.5-flash", "gemini-1.5-flash"):
+            if fallback not in candidate_models:
+                candidate_models.append(fallback)
 
-            client = genai.Client(api_key=self.api_key)
-            combined_prompt = (
-                f"{system_prompt}\n\n"
-                f"--- Target Input Data ---\n"
-                f"{user_prompt}\n\n"
-                f"CRITICAL: Return ONLY a valid JSON object strictly matching the schema."
-            )
-            response = client.models.generate_content(
-                model=gemini_model,
-                contents=combined_prompt,
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                    temperature=0.2,
-                )
-            )
-            if not response or not response.text:
-                raise LLMExecutionError("Gemini returned an empty response.")
-            return response.text
+        from google import genai
+        from google.genai import types
 
-        except Exception as e:
-            err_str = str(e)
-            if "CONSUMER_SUSPENDED" in err_str:
-                raise LLMExecutionError(
-                    "Your Google Gemini API key or project has been suspended by Google (403 CONSUMER_SUSPENDED). "
-                    "Google has disabled project 788089823893 associated with this key. "
-                    "Please generate a new API key at https://aistudio.google.com/apikey under an active project, "
-                    "or set LLM_PROVIDER=mock in .env to test immediately."
+        client = genai.Client(api_key=self.api_key)
+        combined_prompt = (
+            f"{system_prompt}\n\n"
+            f"--- Target Input Data ---\n"
+            f"{user_prompt}\n\n"
+            f"CRITICAL: Return ONLY a valid JSON object strictly matching the schema."
+        )
+
+        last_error = None
+        for model_to_try in candidate_models:
+            try:
+                response = client.models.generate_content(
+                    model=model_to_try,
+                    contents=combined_prompt,
+                    config=types.GenerateContentConfig(
+                        response_mime_type="application/json",
+                        temperature=0.2,
+                    )
                 )
-            if "PERMISSION_DENIED" in err_str or "403" in err_str:
-                raise LLMExecutionError(
-                    f"Gemini API permission denied (403): {err_str}. Please verify that the Gemini API is enabled for your project."
-                )
-            if "RESOURCE_EXHAUSTED" in err_str or "429" in err_str:
-                raise LLMExecutionError("Gemini API rate limit or quota exceeded (429 Resource Exhausted). Please verify your Google AI Studio quota.")
-            if "API_KEY_INVALID" in err_str or "API key not valid" in err_str:
-                raise LLMConfigError("The provided Gemini API key is invalid. Please verify your GEMINI_API_KEY in .env.")
-            raise LLMExecutionError(f"Gemini API call failed: {err_str}")
+                if not response or not response.text:
+                    raise LLMExecutionError("Gemini returned an empty response.")
+                return response.text
+
+            except Exception as e:
+                err_str = str(e)
+                last_error = err_str
+
+                # If 404 NOT_FOUND / no longer available, try the next candidate model
+                if "404" in err_str or "NOT_FOUND" in err_str or "no longer available" in err_str:
+                    continue
+
+                if "CONSUMER_SUSPENDED" in err_str:
+                    raise LLMExecutionError(
+                        "Your Google Gemini API key or project has been suspended by Google (403 CONSUMER_SUSPENDED). "
+                        "Google has disabled project 788089823893 associated with this key. "
+                        "Please generate a new API key at https://aistudio.google.com/apikey under an active project, "
+                        "or set LLM_PROVIDER=mock in .env to test immediately."
+                    )
+                if "PERMISSION_DENIED" in err_str or "403" in err_str:
+                    raise LLMExecutionError(
+                        f"Gemini API permission denied (403): {err_str}. Please verify that the Gemini API is enabled for your project."
+                    )
+                if "RESOURCE_EXHAUSTED" in err_str or "429" in err_str:
+                    raise LLMExecutionError("Gemini API rate limit or quota exceeded (429 Resource Exhausted). Please verify your Google AI Studio quota.")
+                if "API_KEY_INVALID" in err_str or "API key not valid" in err_str:
+                    raise LLMConfigError("The provided Gemini API key is invalid. Please verify your GEMINI_API_KEY in .env.")
+                raise LLMExecutionError(f"Gemini API call failed: {err_str}")
+
+        raise LLMExecutionError(f"Gemini API call failed across candidate models {candidate_models}: {last_error}")
 
     def generate_json(self, system_prompt: str, user_prompt: str, response_model: Type[T]) -> T:
         """Call LLM (Gemini, OpenAI, or Mock) and parse the response into the specified Pydantic model."""
@@ -168,7 +185,35 @@ class LLMService:
         try:
             cleaned = clean_json_text(raw_content)
             data = json.loads(cleaned)
-            return response_model.model_validate(data)
+
+            if isinstance(data, dict):
+                # If wrapped in a single top-level container key
+                wrapper_keys = (
+                    "interview_plan", "plan", "interview", "evaluation", 
+                    "evaluation_report", "report", "response", "data", "result", "output"
+                )
+                for key in wrapper_keys:
+                    if key in data and isinstance(data[key], dict) and len(data) == 1:
+                        data = data[key]
+                        break
+
+            try:
+                return response_model.model_validate(data)
+            except Exception as first_err:
+                # If data contains nested metadata dictionaries, merge them into root
+                if isinstance(data, dict):
+                    merged = dict(data)
+                    for meta_key in ("interview_metadata", "metadata", "plan_metadata"):
+                        if meta_key in data and isinstance(data[meta_key], dict):
+                            for k, v in data[meta_key].items():
+                                if k not in merged or not merged[k]:
+                                    merged[k] = v
+                    try:
+                        return response_model.model_validate(merged)
+                    except Exception:
+                        pass
+                raise first_err
+
         except json.JSONDecodeError as jde:
             raise LLMExecutionError(f"LLM returned invalid JSON: {str(jde)}")
         except Exception as e:

@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 from typing import List, Optional, Dict, Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from app.models.interview import Interview, InterviewReport, InterviewStatus
 from app.services.llm_service import LLMService
 from app.services.transcript_service import TranscriptService
@@ -11,25 +11,55 @@ PROMPT_FILE = Path(__file__).resolve().parent.parent / "prompts" / "evaluator.tx
 
 
 class CompetencyScoreItem(BaseModel):
-    id: str
-    name: str
+    id: str = Field(default="")
+    name: str = Field(default="Competency")
     score: Optional[int] = Field(None, ge=0, le=5, description="Score 0 to 5, or None if Not Assessed")
     weight: int = Field(20, description="Percentage weight from the interview plan")
-    rationale: str
+    rationale: str = Field(default="")
     supporting_quote: Optional[str] = None
-    improvement_recommendation: str
+    improvement_recommendation: str = Field(default="")
+
+    @model_validator(mode="before")
+    @classmethod
+    def handle_score_aliases(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if not data.get("id"):
+                data["id"] = data.get("competency_id") or "comp"
+            if not data.get("name"):
+                data["name"] = data.get("title") or "Competency"
+            if not data.get("rationale"):
+                data["rationale"] = data.get("feedback") or data.get("assessment") or ""
+            if not data.get("improvement_recommendation"):
+                data["improvement_recommendation"] = data.get("recommendation") or data.get("improvement") or ""
+        return data
 
 
 class EvaluationReportSchema(BaseModel):
-    overall_summary: str
-    overall_score: int = Field(..., ge=0, le=100)
-    competency_scores: List[CompetencyScoreItem]
-    strengths: List[str]
-    improvement_areas: List[str]
-    evidence: List[str]
-    suggested_practice_questions: List[str]
-    recommendations: List[str]
-    assessment_limitations: str
+    overall_summary: str = Field(default="")
+    overall_score: int = Field(default=0, ge=0, le=100)
+    competency_scores: List[CompetencyScoreItem] = Field(default_factory=list)
+    strengths: List[str] = Field(default_factory=list)
+    improvement_areas: List[str] = Field(default_factory=list)
+    evidence: List[str] = Field(default_factory=list)
+    suggested_practice_questions: List[str] = Field(default_factory=list)
+    recommendations: List[str] = Field(default_factory=list)
+    assessment_limitations: str = Field(default="")
+
+    @model_validator(mode="before")
+    @classmethod
+    def extract_nested_report(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            for wrapper in ("evaluation_report", "report", "evaluation", "assessment"):
+                if wrapper in data and isinstance(data[wrapper], dict) and len(data) <= 2:
+                    sub = data[wrapper]
+                    data = {**sub, **{k: v for k, v in data.items() if k != wrapper}}
+            if not data.get("overall_summary") and data.get("summary"):
+                data["overall_summary"] = data.get("summary")
+            if not data.get("overall_score") and data.get("score") is not None:
+                data["overall_score"] = int(data.get("score"))
+            if not data.get("competency_scores") and data.get("competencies"):
+                data["competency_scores"] = data.get("competencies")
+        return data
 
 
 class EvaluationService:
@@ -74,12 +104,22 @@ class EvaluationService:
         competencies = plan.get("required_competencies", [])
         transcript_text = TranscriptService.format_transcript_as_text(interview.transcript)
 
-        user_prompt = prompt_template.format(
-            candidate_name=interview.candidate_name,
-            competencies_json=json.dumps(competencies, indent=2),
-            transcript_text=transcript_text[:10000],
-            resume_text=(interview.resume_text or "")[:4000]
-        )
+        try:
+            user_prompt = prompt_template.format(
+                candidate_name=interview.candidate_name,
+                competencies_json=json.dumps(competencies, indent=2),
+                transcript_text=transcript_text[:10000],
+                resume_text=(interview.resume_text or "")[:4000]
+            )
+        except (KeyError, IndexError, ValueError):
+            user_prompt = prompt_template
+            for placeholder, val in {
+                "{candidate_name}": interview.candidate_name,
+                "{competencies_json}": json.dumps(competencies, indent=2),
+                "{transcript_text}": transcript_text[:10000],
+                "{resume_text}": (interview.resume_text or "")[:4000]
+            }.items():
+                user_prompt = user_prompt.replace(placeholder, val)
 
         system_prompt = (
             "You are an objective hiring evaluator. "
