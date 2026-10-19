@@ -95,3 +95,14 @@ def test_conversation_credentials_security(client, prepared_interview):
 def test_invalid_interview_id_returns_404(client):
     response = client.get("/api/interviews/non-existent-uuid-12345/status")
     assert response.status_code == 404
+
+
+def test_live_interview_page_renders(client, prepared_interview):
+    response = client.get(f"/interviews/{prepared_interview.id}/live")
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert 'type="module"' in html
+    assert "live_interview.js" in html
+    assert "audioStatusPill" in html
+    assert prepared_interview.candidate_name in html
+

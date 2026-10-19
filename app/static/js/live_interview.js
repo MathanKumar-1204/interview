@@ -1,11 +1,16 @@
 /**
  * Live Spoken Interview Session Controller
- * Integrates ElevenLabs Conversational AI, Audio Waveform States, and Real-Time Transcript Management.
+ * Uses ElevenLabs Conversational AI Web SDK (@elevenlabs/client) to establish a real-time,
+ * two-way voice stream with microphone capture, agent speech playback, and live transcript synchronization.
  */
 
+import { Conversation } from "https://cdn.jsdelivr.net/npm/@elevenlabs/client/+esm";
+
+let conversationInstance = null;
 let timerInterval = null;
 let elapsedSeconds = 0;
 let isCallActive = false;
+let isFinalizing = false;
 let transcriptTurns = [];
 let conversationId = null;
 
@@ -27,7 +32,8 @@ document.addEventListener("DOMContentLoaded", () => {
   const transcriptToggleHeader = document.getElementById("transcriptToggleHeader");
   const transcriptPanelBody = document.getElementById("transcriptPanelBody");
   const finalizingModal = document.getElementById("finalizingModal");
-  const authWidgetMount = document.getElementById("authWidgetMount");
+  const audioStatusDot = document.getElementById("audioStatusDot");
+  const audioStatusText = document.getElementById("audioStatusText");
 
   // Format seconds to MM:SS
   function formatTime(totalSecs) {
@@ -39,12 +45,18 @@ document.addEventListener("DOMContentLoaded", () => {
   // Update timer display & progress bar
   function tickTimer() {
     elapsedSeconds++;
-    timerDisplay.textContent = formatTime(elapsedSeconds);
+    if (timerDisplay) {
+      timerDisplay.textContent = formatTime(elapsedSeconds);
+    }
 
-    const totalSeconds = targetDurationMinutes * 60;
+    const totalSeconds = (targetDurationMinutes || 15) * 60;
     const pct = Math.min(100, Math.round((elapsedSeconds / totalSeconds) * 100));
-    progressBarFill.style.width = `${pct}%`;
-    progressPercent.textContent = `${pct}% Elapsed`;
+    if (progressBarFill) {
+      progressBarFill.style.width = `${pct}%`;
+    }
+    if (progressPercent) {
+      progressPercent.textContent = `${pct}% Elapsed`;
+    }
   }
 
   function startTimer() {
@@ -60,6 +72,29 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
+  // Set audio status pill state
+  function updateAudioStatus(text, dotColor) {
+    if (audioStatusText) audioStatusText.textContent = text;
+    if (audioStatusDot) audioStatusDot.style.backgroundColor = dotColor;
+  }
+
+  // Reset Start Button
+  function resetStartButton(message = "▶️ Start Interview Call") {
+    if (startBtn) {
+      startBtn.disabled = !isElevenLabsConfigured;
+      startBtn.style.display = "inline-flex";
+      startBtn.textContent = message;
+    }
+    if (endBtn) {
+      endBtn.style.display = "none";
+    }
+    if (connectionBadge) {
+      connectionBadge.className = "badge badge-gray";
+      connectionBadge.textContent = "Not Connected";
+    }
+    updateAudioStatus("Microphone & audio ready", "#94a3b8");
+  }
+
   // Append a turn to transcript
   function appendTranscriptTurn(role, text) {
     if (!text || !text.trim()) return;
@@ -68,7 +103,7 @@ document.addEventListener("DOMContentLoaded", () => {
       emptyTranscriptMsg.style.display = "none";
     }
 
-    const cleanRole = role === "agent" || role === "interviewer" ? "interviewer" : "candidate";
+    const cleanRole = (role === "agent" || role === "interviewer" || role === "ai") ? "interviewer" : "candidate";
     const turn = {
       role: cleanRole,
       message: text.trim(),
@@ -79,16 +114,20 @@ document.addEventListener("DOMContentLoaded", () => {
     const msgEl = document.createElement("div");
     msgEl.className = `transcript-message ${cleanRole}`;
 
-    const roleLabel = cleanRole === "interviewer" ? "Alex (AI Interviewer)" : candidateName;
+    const roleLabel = cleanRole === "interviewer" ? "Alex (AI Interviewer)" : (candidateName || "Candidate");
     msgEl.innerHTML = `
-      <div class="message-role">${roleLabel} <span style="font-weight: normal; font-size: 0.7rem; color: var(--text-muted);">• ${formatTime(elapsedSeconds)}</span></div>
+      <div class="message-role">${escapeHtml(roleLabel)} <span style="font-weight: normal; font-size: 0.7rem; color: var(--text-muted);">• ${formatTime(elapsedSeconds)}</span></div>
       <div>${escapeHtml(text.trim())}</div>
     `;
 
-    transcriptBox.appendChild(msgEl);
-    transcriptBox.scrollTop = transcriptBox.scrollHeight;
+    if (transcriptBox) {
+      transcriptBox.appendChild(msgEl);
+      transcriptBox.scrollTop = transcriptBox.scrollHeight;
+    }
 
-    turnCounter.textContent = `${transcriptTurns.length} exchange${transcriptTurns.length === 1 ? "" : "s"}`;
+    if (turnCounter) {
+      turnCounter.textContent = `${transcriptTurns.length} exchange${transcriptTurns.length === 1 ? "" : "s"}`;
+    }
 
     // Sync turns with server in background
     syncTranscriptToServer();
@@ -100,19 +139,23 @@ document.addEventListener("DOMContentLoaded", () => {
     return div.innerHTML;
   }
 
-  async function syncTranscriptToServer() {
-    try {
-      await fetch(`/api/interviews/${interviewId}/transcript`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          transcript: transcriptTurns,
-          conversation_id: conversationId
-        })
-      });
-    } catch (e) {
-      console.warn("Background transcript sync failed:", e);
-    }
+  let syncTimeout = null;
+  function syncTranscriptToServer() {
+    clearTimeout(syncTimeout);
+    syncTimeout = setTimeout(async () => {
+      try {
+        await fetch(`/api/interviews/${interviewId}/transcript`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            transcript: transcriptTurns,
+            conversation_id: conversationId
+          })
+        });
+      } catch (e) {
+        console.warn("Background transcript sync failed:", e);
+      }
+    }, 400);
   }
 
   // Toggle Transcript panel
@@ -120,112 +163,215 @@ document.addEventListener("DOMContentLoaded", () => {
     transcriptToggleHeader.addEventListener("click", () => {
       const isVisible = transcriptPanelBody.style.display !== "none";
       transcriptPanelBody.style.display = isVisible ? "none" : "block";
-      transcriptToggleBtn.textContent = isVisible ? "Expand ▼" : "Collapse ▲";
+      if (transcriptToggleBtn) {
+        transcriptToggleBtn.textContent = isVisible ? "Expand ▼" : "Collapse ▲";
+      }
     });
   }
 
-  // Handle Start Interview
-  startBtn.addEventListener("click", async () => {
-    if (!isElevenLabsConfigured) {
-      alert("ElevenLabs credentials are not configured. Please check your .env settings.");
-      return;
-    }
-
-    startBtn.disabled = true;
-    startBtn.textContent = "Connecting to Microphone & Agent...";
-    connectionBadge.className = "badge badge-amber";
-    connectionBadge.textContent = "Requesting Mic & Token";
-
-    try {
-      // Step 1: Check microphone permissions explicitly
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      // Release initial probe stream
-      stream.getTracks().forEach(t => t.stop());
-
-      // Step 2: Fetch secure conversation credentials
-      const res = await fetch(`/api/interviews/${interviewId}/conversation-credentials`);
-      const creds = await res.json();
-
-      if (!res.ok) {
-        throw new Error(creds.error || "Failed to obtain interview conversation credentials.");
+  // Handle Start Interview Call
+  if (startBtn) {
+    startBtn.addEventListener("click", async () => {
+      if (!isElevenLabsConfigured) {
+        alert("ElevenLabs credentials are not configured. Please check your .env settings.");
+        return;
       }
 
-      // Step 3: Initialize ElevenLabs Conversational AI
-      if (creds.auth_mode === "signed_url") {
-        if (!authWidgetMount) {
-          throw new Error("Widget mount point not found.");
+      startBtn.disabled = true;
+      startBtn.textContent = "Requesting Microphone Access...";
+      if (connectionBadge) {
+        connectionBadge.className = "badge badge-amber";
+        connectionBadge.textContent = "Mic Permission";
+      }
+      updateAudioStatus("Requesting microphone permission...", "#f59e0b");
+
+      try {
+        // Step 1: Explicitly request and verify microphone permission
+        let micStream;
+        try {
+          micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          // Stop probe track immediately; SDK will acquire its own stream
+          micStream.getTracks().forEach((track) => track.stop());
+        } catch (micErr) {
+          console.error("Microphone permission denied or failed:", micErr);
+          alert(
+            "Microphone access is required for the spoken interview.\n\n" +
+            "Please click the microphone/lock icon in your browser's address bar, allow microphone access, and try again."
+          );
+          resetStartButton();
+          return;
         }
-        authWidgetMount.innerHTML = "";
-        const widget = document.createElement("elevenlabs-convai");
-        widget.setAttribute("signed-url", creds.signed_url);
-        widget.setAttribute("dynamic-variables", JSON.stringify(creds.dynamic_variables));
-        authWidgetMount.appendChild(widget);
+
+        // Step 2: Fetch secure conversation credentials from server
+        startBtn.textContent = "Connecting to Voice Agent...";
+        updateAudioStatus("Obtaining secure interview session token...", "#f59e0b");
+        if (connectionBadge) {
+          connectionBadge.textContent = "Securing Session";
+        }
+
+        const res = await fetch(`/api/interviews/${interviewId}/conversation-credentials`);
+        const creds = await res.json();
+
+        if (!res.ok) {
+          throw new Error(creds.error || "Failed to obtain interview conversation credentials.");
+        }
+
+        // Step 3: Start conversation session via ElevenLabs Client SDK
+        updateAudioStatus("Connecting audio stream...", "#f59e0b");
+        if (connectionBadge) {
+          connectionBadge.textContent = "Opening Audio Stream";
+        }
+
+        const sessionConfig = {
+          dynamicVariables: creds.dynamic_variables || {
+            interview_id: interviewId,
+            candidate_name: candidateName,
+            job_title: jobTitle
+          },
+          onConnect: ({ conversationId: id }) => {
+            console.log("Connected to ElevenLabs session:", id);
+            conversationId = id;
+            isCallActive = true;
+
+            if (connectionBadge) {
+              connectionBadge.className = "badge badge-emerald";
+              connectionBadge.textContent = "Live Voice Connected";
+            }
+            if (studioStateTitle) {
+              studioStateTitle.textContent = "Interview in Progress";
+            }
+            if (studioStateSubtitle) {
+              studioStateSubtitle.textContent =
+                "Alex (AI Interviewer) is conducting your spoken interview. Speak clearly into your microphone.";
+            }
+
+            updateAudioStatus("Connected • Voice stream active", "#10b981");
+
+            startBtn.style.display = "none";
+            if (endBtn) {
+              endBtn.style.display = "inline-flex";
+            }
+
+            startTimer();
+          },
+          onDisconnect: (details) => {
+            console.log("ElevenLabs session disconnected:", details);
+            isCallActive = false;
+            if (!isFinalizing) {
+              if (connectionBadge) {
+                connectionBadge.className = "badge badge-gray";
+                connectionBadge.textContent = "Call Ended";
+              }
+              if (voiceOrb) {
+                voiceOrb.className = "pulsing-orb";
+              }
+              if (orbIcon) {
+                orbIcon.textContent = "🎙️";
+              }
+              updateAudioStatus("Voice call disconnected", "#94a3b8");
+            }
+          },
+          onModeChange: ({ mode }) => {
+            console.log("ElevenLabs mode:", mode);
+            if (mode === "speaking") {
+              if (voiceOrb) voiceOrb.className = "pulsing-orb speaking";
+              if (orbIcon) orbIcon.textContent = "🎙️";
+              if (connectionBadge) {
+                connectionBadge.className = "badge badge-indigo";
+                connectionBadge.textContent = "Alex is Speaking";
+              }
+              updateAudioStatus("Alex is speaking...", "#6366f1");
+            } else if (mode === "listening") {
+              if (voiceOrb) voiceOrb.className = "pulsing-orb listening";
+              if (orbIcon) orbIcon.textContent = "🗣️";
+              if (connectionBadge) {
+                connectionBadge.className = "badge badge-emerald";
+                connectionBadge.textContent = "Listening to You";
+              }
+              updateAudioStatus("Listening • Speak into your microphone", "#10b981");
+            }
+          },
+          onMessage: (messagePayload) => {
+            console.log("ElevenLabs message received:", messagePayload);
+            const rawRole = messagePayload.role || (messagePayload.source === "user" ? "user" : "agent");
+            const text = messagePayload.message || "";
+            appendTranscriptTurn(rawRole, text);
+          },
+          onError: (message, context) => {
+            console.error("ElevenLabs error:", message, context);
+            if (connectionBadge) {
+              connectionBadge.className = "badge badge-rose";
+              connectionBadge.textContent = "Audio Stream Warning";
+            }
+            updateAudioStatus("Audio Notice: " + (message || "Connection event"), "#ef4444");
+          },
+          onStatusChange: ({ status }) => {
+            console.log("ElevenLabs status change:", status);
+            if (status === "connecting") {
+              if (connectionBadge) {
+                connectionBadge.className = "badge badge-amber";
+                connectionBadge.textContent = "Connecting to Voice...";
+              }
+            }
+          }
+        };
+
+        if (creds.auth_mode === "signed_url") {
+          sessionConfig.signedUrl = creds.signed_url;
+        } else {
+          sessionConfig.agentId = creds.agent_id || configuredAgentId;
+        }
+
+        conversationInstance = await Conversation.startSession(sessionConfig);
+
+      } catch (err) {
+        console.error("Call initialization failed:", err);
+        alert("Could not start voice interview call: " + err.message);
+        resetStartButton();
       }
-
-      // Update UI to Active Call
-      isCallActive = true;
-      startBtn.style.display = "none";
-      endBtn.style.display = "inline-flex";
-      connectionBadge.className = "badge badge-emerald";
-      connectionBadge.textContent = "Live Voice Call";
-      studioStateTitle.textContent = "Interview in Progress";
-      studioStateSubtitle.textContent = "Alex is conducting your spoken interview. Speak naturally through your microphone.";
-      voiceOrb.classList.add("listening");
-      orbIcon.textContent = "🗣️";
-
-      startTimer();
-
-    } catch (err) {
-      console.error("Call initialization error:", err);
-      alert("Could not start interview call: " + err.message);
-      startBtn.disabled = false;
-      startBtn.textContent = "▶️ Start Interview Call";
-      connectionBadge.className = "badge badge-rose";
-      connectionBadge.textContent = "Connection Error";
-    }
-  });
-
-  // Listen to ElevenLabs widget custom events
-  window.addEventListener("elevenlabs-convai:call", (event) => {
-    console.log("ElevenLabs Call Event:", event.detail);
-    if (event.detail && event.detail.conversationId) {
-      conversationId = event.detail.conversationId;
-    }
-  });
-
-  window.addEventListener("elevenlabs-convai:message", (event) => {
-    if (event.detail) {
-      const role = event.detail.role || (event.detail.source === "user" ? "candidate" : "agent");
-      const text = event.detail.message || event.detail.text || "";
-      appendTranscriptTurn(role, text);
-
-      // Adjust orb visualizer state based on who is speaking
-      if (role === "candidate" || role === "user") {
-        voiceOrb.className = "pulsing-orb listening";
-        orbIcon.textContent = "🗣️";
-      } else {
-        voiceOrb.className = "pulsing-orb speaking";
-        orbIcon.textContent = "🎙️";
-      }
-    }
-  });
+    });
+  }
 
   // Handle End Interview & Finalize
-  endBtn.addEventListener("click", async () => {
-    if (!confirm("Are you ready to conclude your interview session and generate the evaluation report?")) {
-      return;
-    }
+  if (endBtn) {
+    endBtn.addEventListener("click", async () => {
+      const candidateTurns = transcriptTurns.filter((t) => t.role === "candidate");
+      if (candidateTurns.length === 0 && transcriptTurns.length < 2) {
+        const proceed = confirm(
+          "Notice: Alex and you haven't exchanged enough answers yet for a thorough evaluation.\n\n" +
+          "Are you sure you want to conclude the session and generate the report now?"
+        );
+        if (!proceed) return;
+      } else {
+        const proceed = confirm(
+          "Are you ready to conclude your interview session and generate the evaluation report?"
+        );
+        if (!proceed) return;
+      }
 
-    await finalizeAndRedirect("normal");
-  });
+      await finalizeAndRedirect("normal");
+    });
+  }
 
   async function finalizeAndRedirect(reason) {
+    isFinalizing = true;
     stopTimer();
-    endBtn.disabled = true;
-    finalizingModal.classList.add("active");
+
+    if (endBtn) endBtn.disabled = true;
+    if (finalizingModal) finalizingModal.classList.add("active");
+
+    // Close conversation session gracefully
+    if (conversationInstance) {
+      try {
+        await conversationInstance.endSession();
+      } catch (endErr) {
+        console.warn("Session end warning:", endErr);
+      }
+      conversationInstance = null;
+    }
 
     try {
-      // Step 1: Tell server call has ended
+      // Step 1: Tell server call has concluded
       await fetch(`/api/interviews/${interviewId}/end`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -235,7 +381,7 @@ document.addEventListener("DOMContentLoaded", () => {
         })
       });
 
-      // Step 2: Trigger finalization and report generation
+      // Step 2: Trigger report evaluation
       const finalRes = await fetch(`/api/interviews/${interviewId}/finalize`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -247,7 +393,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
       const finalData = await finalRes.json();
       if (!finalRes.ok) {
-        throw new Error(finalData.error || "Failed to finalize evaluation.");
+        throw new Error(finalData.error || "Evaluation synthesis failed.");
       }
 
       // Success: redirect to report
@@ -255,9 +401,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
     } catch (err) {
       console.error("Finalization error:", err);
-      finalizingModal.classList.remove("active");
+      if (finalizingModal) finalizingModal.classList.remove("active");
       alert("Evaluation Notice: " + err.message);
-      // If transcript was too short or interrupted, return to preparation or dashboard
+      // Return to interview preparation or dashboard
       window.location.href = `/interviews/${interviewId}`;
     }
   }
@@ -265,7 +411,15 @@ document.addEventListener("DOMContentLoaded", () => {
   // Handle window unload gracefully
   window.addEventListener("beforeunload", () => {
     if (isCallActive) {
-      navigator.sendBeacon(`/api/interviews/${interviewId}/end`, JSON.stringify({ reason: "interrupted" }));
+      navigator.sendBeacon(
+        `/api/interviews/${interviewId}/end`,
+        JSON.stringify({ reason: "interrupted" })
+      );
+      if (conversationInstance) {
+        try {
+          conversationInstance.endSession();
+        } catch (_) {}
+      }
     }
   });
 });

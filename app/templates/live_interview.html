@@ -51,27 +51,22 @@
     <h2 id="studioStateTitle" style="font-size: 1.4rem; font-weight: 700; margin-bottom: 0.5rem; color: var(--text-main);">
       Ready for Spoken Assessment
     </h2>
-    <p id="studioStateSubtitle" style="color: var(--text-secondary); max-width: 540px; margin: 0 auto 2rem; font-size: 0.95rem;">
-      When you click "Start Interview", your browser will request microphone access to connect with Alex, your AI interviewer. Speak naturally as you would in a real interview.
+    <p id="studioStateSubtitle" style="color: var(--text-secondary); max-width: 580px; margin: 0 auto 1.5rem; font-size: 0.95rem;">
+      When you click "Start Interview Call", Alex (your AI interviewer) will connect and greet you with the first interview question. Speak into your microphone to answer.
     </p>
 
-    <!-- ElevenLabs Official Web Component Container -->
-    <div id="elevenlabsWidgetContainer" style="margin-bottom: 1.5rem; min-height: 80px; display: flex; justify-content: center; align-items: center;">
-      {% if elevenlabs_ready %}
-        {% if auth_mode == 'public' %}
-          <elevenlabs-convai 
-            id="elevenlabsWidget"
-            agent-id="{{ agent_id }}"
-            dynamic-variables='{"interview_id": "{{ interview.id }}", "candidate_name": "{{ interview.candidate_name }}", "job_title": "{{ interview.job_title }}"}'>
-          </elevenlabs-convai>
-        {% else %}
-          <!-- Authenticated signed_url container initialized via JS -->
-          <div id="authWidgetMount"></div>
-        {% endif %}
-      {% else %}
+    <!-- Voice Connection Status Indicator -->
+    <div id="voiceStatusContainer" style="margin-bottom: 1.5rem; min-height: 48px; display: flex; justify-content: center; align-items: center;">
+      {% if not elevenlabs_ready %}
         <div class="config-banner" style="display: inline-flex; margin: 0 auto;">
           <span>⚠️ <b>Configuration Required:</b> Set <code>ELEVENLABS_API_KEY</code> and <code>ELEVENLABS_AGENT_ID</code> in <code>.env</code> to enable live voice calling.</span>
         </div>
+      {% else %}
+        <div id="audioStatusPill" style="font-size: 0.875rem; font-weight: 500; color: var(--text-secondary); display: inline-flex; align-items: center; gap: 0.6rem; padding: 0.4rem 1rem; background: var(--bg-muted); border-radius: var(--radius-full); border: 1px solid var(--border-color);">
+          <span id="audioStatusDot" style="width: 10px; height: 10px; border-radius: 50%; background-color: #94a3b8; display: inline-block;"></span>
+          <span id="audioStatusText">Microphone & audio ready</span>
+        </div>
+        <div id="authWidgetMount" style="display: none;"></div>
       {% endif %}
     </div>
 
@@ -148,5 +143,5 @@
   const configuredAgentId = "{{ agent_id }}";
   const isElevenLabsConfigured = {{ 'true' if elevenlabs_ready else 'false' }};
 </script>
-<script src="{{ url_for('static', filename='js/live_interview.js') }}"></script>
+<script type="module" src="{{ url_for('static', filename='js/live_interview.js') }}"></script>
 {% endblock %}
