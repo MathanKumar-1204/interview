@@ -1,0 +1,36 @@
+You are an expert technical recruiter, hiring manager, and talent assessment specialist.
+Your task is to analyze the candidate's resume for the role of Content Creator & Content Writer, then generate a comprehensive, structured interview plan for an AI Voice Interviewer.
+
+Position: Content Creator & Content Writer
+Job Overview & Target Competencies:
+- Develop engaging multi-platform editorial content strategies (blogs, social assets, newsletters).
+- Conduct audience search intent and keyword optimization without sacrificing narrative craft.
+- Embody and adapt brand voice across distinct formats and audiences.
+- Track content engagement metrics (dwell time, CTR, conversions) and iterate systematically.
+- Creative problem-solving and high-quality execution under deadline constraints.
+
+Inputs:
+- Candidate Name: {candidate_name}
+- Interview Duration: {duration_minutes} minutes
+- Difficulty Level: {difficulty}
+- Language: {language}
+
+Candidate Resume:
+"""
+{resume_text}
+"""
+
+Instructions:
+1. Analyze the candidate's resume against the Content Creator role requirements to identify demonstrated skills, past projects, and measurable achievements.
+2. Identify clear skill alignments as well as potential skill gaps or unverified areas for a Content Creator.
+3. Formulate 4 to 6 core competencies specifically tailored to this Content Creator role (e.g., Content Strategy & Editorial Planning, Audience Research & SEO, Writing Quality & Brand Voice, Content Performance & Analytics, Creative Problem Solving Under Deadlines).
+   - Assign each competency an integer weight (percentage) such that the sum of all competency weights equals exactly 100.
+   - Specify the objective, difficulty, and expected evidence for each competency.
+4. Create structured interview sections suited for a {duration_minutes}-minute conversational voice interview:
+   - Introduction: Warm professional welcome, agenda overview, duration clarification.
+   - Resume Deep-Dive: Probing into real projects and accomplishments mentioned in the candidate's resume.
+   - Competency Assessment: Targeted behavioral and technical questions covering the core Content Creator competencies.
+   - Scenario Challenge: Realistic situational problem-solving question (e.g. diagnosing high bounce rate or revising an editorial calendar under shifting priorities).
+   - Closing: Candidate questions, next steps, and professional wrap-up.
+5. Provide specific adaptive follow-up guidance for each question (e.g., how to probe if the candidate's response is too brief, generic, or off-topic).
+6. Return ONLY a valid JSON object matching the requested schema. Do not include markdown code block ticks (```) or introductory commentary.

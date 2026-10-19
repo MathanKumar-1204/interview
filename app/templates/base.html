@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}AI Interview Studio - Voice Interviewer{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <!-- ElevenLabs Official Conversational AI Widget Script -->
+  <script src="https://elevenlabs.io/convai-widget/index.js" async type="text/javascript"></script>
+</head>
+<body>
+  <!-- Navigation Bar -->
+  <nav class="navbar">
+    <div class="nav-container">
+      <a href="{{ url_for('dashboard.index') }}" class="brand-logo">
+        <div class="brand-icon">🎙️</div>
+        <span>AI Interview Studio</span>
+      </a>
+      <div class="nav-links">
+        <a href="{{ url_for('dashboard.index') }}" class="nav-link">Dashboard</a>
+        <a href="{{ url_for('interviews.new_interview') }}" class="btn btn-primary btn-sm">+ Start Interview</a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Flash Messages -->
+  <main class="main-content">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        <div style="margin-bottom: 1.5rem;">
+          {% for category, message in messages %}
+            <div class="config-banner" style="{% if category == 'danger' %}background: var(--danger-light); color: var(--danger); border-color: #fecaca;{% elif category == 'success' %}background: var(--success-light); color: #065f46; border-color: #a7f3d0;{% endif %}">
+              <span>{{ message }}</span>
+            </div>
+          {% endfor %}
+        </div>
+      {% endif %}
+    {% endwith %}
+
+    {% if error_title %}
+      <div class="card" style="text-align: center; padding: 3rem 1.5rem;">
+        <h2 style="font-size: 1.8rem; margin-bottom: 0.5rem; color: var(--text-main);">{{ error_title }}</h2>
+        <p style="color: var(--text-secondary); margin-bottom: 1.5rem;">{{ error_message }}</p>
+        <a href="{{ url_for('dashboard.index') }}" class="btn btn-primary">Return to Dashboard</a>
+      </div>
+    {% else %}
+      {% block content %}{% endblock %}
+    {% endif %}
+  </main>
+
+  <!-- Footer -->
+  <footer class="footer">
+    <div style="max-width: 1200px; margin: 0 auto; display: flex; flex-direction: column; gap: 0.4rem; align-items: center;">
+      <p><b>AI Interview Studio</b> • Spoken AI Candidate Evaluations Powered by ElevenLabs Conversational AI</p>
+      <p style="font-size: 0.775rem;">
+        Notice: Third-party AI and voice models are utilized to analyze documents and conduct assessments. Reports provide developmental feedback for human review, not definitive hiring decisions.
+      </p>
+    </div>
+  </footer>
+
+  {% block scripts %}{% endblock %}
+</body>
+</html>

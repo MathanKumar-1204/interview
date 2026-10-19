@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+
+{% block title %}Interview Setup - AI Interview Studio{% endblock %}
+
+{% block content %}
+<div style="max-width: 820px; margin: 0 auto;">
+  <div style="margin-bottom: 2rem;">
+    <a href="{{ url_for('dashboard.index') }}" style="display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.875rem; color: var(--text-secondary); margin-bottom: 0.5rem;">
+      ← Back to Dashboard
+    </a>
+    <h1 style="font-size: 1.85rem; font-weight: 700; color: var(--text-main);">
+      Configure Voice Interview
+    </h1>
+    <p style="color: var(--text-secondary);">
+      The AI interviewer is pre-configured for the <b>Content Creator & Content Writer</b> role. Upload the candidate's resume to generate a targeted competency assessment.
+    </p>
+  </div>
+
+  <form id="setupForm" enctype="multipart/form-data">
+    <!-- Candidate & Configuration Card -->
+    <div class="card">
+      <div class="card-header">
+        <h2 class="card-title">👤 Candidate Information & Interview Settings</h2>
+        <span class="badge badge-indigo">Role: Content Creator</span>
+      </div>
+
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem;">
+        <div class="form-group">
+          <label class="form-label" for="candidate_name">Candidate Name <span class="required">*</span></label>
+          <input type="text" id="candidate_name" name="candidate_name" class="form-input" placeholder="e.g. Maya Chen" required>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="candidate_email">Candidate Email (Optional)</label>
+          <input type="email" id="candidate_email" name="candidate_email" class="form-input" placeholder="e.g. maya.chen@example.com">
+        </div>
+      </div>
+
+      <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1.25rem;">
+        <div class="form-group">
+          <label class="form-label" for="duration_minutes">Duration</label>
+          <select id="duration_minutes" name="duration_minutes" class="form-select">
+            <option value="10">10 Minutes</option>
+            <option value="15" selected>15 Minutes (Standard)</option>
+            <option value="20">20 Minutes</option>
+            <option value="30">30 Minutes (In-Depth)</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="difficulty">Difficulty</label>
+          <select id="difficulty" name="difficulty" class="form-select">
+            <option value="Beginner">Beginner / Entry</option>
+            <option value="Intermediate" selected>Intermediate / Mid</option>
+            <option value="Advanced">Advanced / Senior</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="language">Language</label>
+          <select id="language" name="language" class="form-select">
+            <option value="English" selected>English</option>
+          </select>
+        </div>
+      </div>
+
+      <div style="padding: 0.75rem 1rem; background: var(--bg-main); border: 1px solid var(--border-color); border-radius: var(--radius-md); font-size: 0.85rem; color: var(--text-secondary); margin-top: 0.5rem;">
+        <b>Target Position:</b> Content Creator & Content Writer • Focuses on Content Strategy, SEO & Audience Research, Brand Voice Adaptation, and Performance Analytics.
+      </div>
+    </div>
+
+    <!-- Candidate Resume Upload Card -->
+    <div class="card">
+      <div class="card-header">
+        <h2 class="card-title">📄 Candidate Resume <span class="required" style="color: var(--danger);">*</span></h2>
+        <span style="font-size: 0.8rem; color: var(--text-muted);">PDF or DOCX (Max 10 MB)</span>
+      </div>
+
+      <div class="form-group">
+        <div class="file-dropzone" id="resumeDropzone">
+          <input type="file" id="resume_file" name="resume_file" accept=".pdf,.docx,.txt" required>
+          <div class="dropzone-icon">📎</div>
+          <div style="font-weight: 600; margin-bottom: 0.25rem;">Drag & drop resume here, or browse</div>
+          <div style="font-size: 0.8rem; color: var(--text-secondary);">Text-based PDF or DOCX format</div>
+          <div class="file-preview" id="resumePreview" style="display: none;"></div>
+        </div>
+        <div class="form-hint">The resume text is parsed locally and compared against the Content Creator role competencies.</div>
+      </div>
+    </div>
+
+    <!-- Error Display Box -->
+    <div id="formErrorBox" class="config-banner" style="display: none; background: #fef2f2; border-color: #fecaca; color: #991b1b;">
+      <span style="font-size: 1.25rem;">⚠️</span>
+      <div id="formErrorMessage"></div>
+    </div>
+
+    <!-- Submit Action -->
+    <div style="display: flex; justify-content: flex-end; gap: 1rem; align-items: center; margin-top: 2rem;">
+      <a href="{{ url_for('dashboard.index') }}" class="btn btn-secondary">Cancel</a>
+      <button type="submit" id="submitBtn" class="btn btn-primary btn-lg">
+        <span id="btnText">Generate Interview Plan →</span>
+        <span id="btnSpinner" style="display: none;">⏳ Extracting & Preparing...</span>
+      </button>
+    </div>
+  </form>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/setup.js') }}"></script>
+{% endblock %}

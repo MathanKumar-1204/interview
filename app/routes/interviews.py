@@ -1,0 +1,62 @@
+from flask import Blueprint, render_template, abort, redirect, url_for, flash
+from app.models.interview import Interview, InterviewStatus
+from app.config import Config
+from app.extensions import db
+
+interviews_bp = Blueprint("interviews", __name__, url_prefix="/interviews")
+
+
+@interviews_bp.route("/new")
+def new_interview():
+    """Setup page for starting a new interview."""
+    elevenlabs_ready = Config.is_elevenlabs_configured()
+    llm_ready = Config.is_llm_configured()
+    return render_template(
+        "interview_setup.html",
+        elevenlabs_ready=elevenlabs_ready,
+        llm_ready=llm_ready
+    )
+
+
+@interviews_bp.route("/<interview_id>")
+def view_preparation(interview_id: str):
+    """Interview preparation page showing extracted competencies, plan, and gaps."""
+    interview = db.session.get(Interview, interview_id)
+    if not interview:
+        abort(404, description="Interview not found.")
+
+    if interview.status == InterviewStatus.COMPLETED and interview.report:
+        return redirect(url_for("reports.view_report", interview_id=interview.id))
+
+    return render_template(
+        "interview_preparation.html",
+        interview=interview,
+        plan=interview.interview_plan or {},
+        elevenlabs_ready=Config.is_elevenlabs_configured(),
+        InterviewStatus=InterviewStatus
+    )
+
+
+@interviews_bp.route("/<interview_id>/live")
+def live_interview(interview_id: str):
+    """Dedicated live conversational voice interview screen."""
+    interview = db.session.get(Interview, interview_id)
+    if not interview:
+        abort(404, description="Interview not found.")
+
+    # Redirect completed interviews to report
+    if interview.status == InterviewStatus.COMPLETED and interview.report:
+        return redirect(url_for("reports.view_report", interview_id=interview.id))
+
+    elevenlabs_ready = Config.is_elevenlabs_configured()
+    auth_mode = Config.ELEVENLABS_AUTH_MODE
+    agent_id = Config.ELEVENLABS_AGENT_ID
+
+    return render_template(
+        "live_interview.html",
+        interview=interview,
+        elevenlabs_ready=elevenlabs_ready,
+        auth_mode=auth_mode,
+        agent_id=agent_id,
+        InterviewStatus=InterviewStatus
+    )
