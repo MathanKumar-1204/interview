@@ -3,17 +3,40 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-(BASE_DIR / "instance").mkdir(parents=True, exist_ok=True)
-(BASE_DIR / "instance" / "uploads").mkdir(parents=True, exist_ok=True)
+
+# Detect Vercel / serverless runtime environment
+IS_VERCEL = bool(os.getenv("VERCEL") or os.getenv("AWS_LAMBDA_FUNCTION_NAME"))
+
+if IS_VERCEL:
+    INSTANCE_DIR = Path("/tmp/instance")
+    DEFAULT_UPLOAD_DIR = Path("/tmp/uploads")
+else:
+    INSTANCE_DIR = BASE_DIR / "instance"
+    DEFAULT_UPLOAD_DIR = BASE_DIR / "instance" / "uploads"
+
+try:
+    INSTANCE_DIR.mkdir(parents=True, exist_ok=True)
+    DEFAULT_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+except OSError:
+    INSTANCE_DIR = Path("/tmp/instance")
+    DEFAULT_UPLOAD_DIR = Path("/tmp/uploads")
+    try:
+        INSTANCE_DIR.mkdir(parents=True, exist_ok=True)
+        DEFAULT_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        pass
 
 load_dotenv(BASE_DIR / ".env")
 
-DEFAULT_DB_PATH = (BASE_DIR / "instance" / "interview_studio.db").as_posix()
+DEFAULT_DB_PATH = (INSTANCE_DIR / "interview_studio.db").as_posix()
 raw_db_url = os.getenv("DATABASE_URL", "").strip()
 if not raw_db_url or "sqlite:///instance/" in raw_db_url or raw_db_url == "sqlite:///instance/interview_studio.db":
     RESOLVED_DB_URL = f"sqlite:///{DEFAULT_DB_PATH}"
 else:
-    RESOLVED_DB_URL = raw_db_url
+    if raw_db_url.startswith("postgres://"):
+        RESOLVED_DB_URL = raw_db_url.replace("postgres://", "postgresql://", 1)
+    else:
+        RESOLVED_DB_URL = raw_db_url
 
 
 class Config:
@@ -27,7 +50,7 @@ class Config:
     
     # Upload settings
     MAX_CONTENT_LENGTH = int(os.getenv("MAX_CONTENT_LENGTH", 10 * 1024 * 1024))  # 10 MB
-    UPLOAD_FOLDER = BASE_DIR / os.getenv("UPLOAD_FOLDER", "instance/uploads")
+    UPLOAD_FOLDER = DEFAULT_UPLOAD_DIR if IS_VERCEL else (BASE_DIR / os.getenv("UPLOAD_FOLDER", "instance/uploads"))
     ALLOWED_EXTENSIONS = {"pdf", "docx", "txt"}
     
     # ElevenLabs Conversational AI

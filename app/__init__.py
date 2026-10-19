@@ -1,7 +1,7 @@
 import os
 from datetime import datetime
 from flask import Flask, render_template
-from app.config import config_by_name, Config
+from app.config import config_by_name, Config, INSTANCE_DIR
 from app.extensions import db
 from app.routes.dashboard import dashboard_bp
 from app.routes.interviews import interviews_bp
@@ -11,15 +11,21 @@ from app.routes.api import api_bp
 
 def create_app(config_name: str = "development") -> Flask:
     """Application factory for AI Interview Studio."""
-    app = Flask(__name__)
+    app = Flask(__name__, instance_path=str(INSTANCE_DIR))
     
     # Load configuration
     cfg = config_by_name.get(config_name, Config)
     app.config.from_object(cfg)
 
-    # Ensure upload and instance directories exist
-    os.makedirs(app.config["UPLOAD_FOLDER"], exist_ok=True)
-    os.makedirs(app.instance_path, exist_ok=True)
+    # Ensure upload and instance directories exist safely
+    try:
+        os.makedirs(app.config["UPLOAD_FOLDER"], exist_ok=True)
+    except OSError:
+        pass
+    try:
+        os.makedirs(app.instance_path, exist_ok=True)
+    except OSError:
+        pass
 
     # Initialize extensions
     db.init_app(app)
