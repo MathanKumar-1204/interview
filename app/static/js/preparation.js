@@ -60,6 +60,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
         const data = await response.json();
         if (response.ok && data.success) {
+          if (data.interview) {
+            sessionStorage.setItem("interview_" + interviewId, JSON.stringify(data.interview));
+            sessionStorage.setItem("current_interview", JSON.stringify(data.interview));
+          }
           window.location.reload();
         } else {
           alert(data.error || "Failed to generate interview plan.");

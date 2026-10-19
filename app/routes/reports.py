@@ -1,6 +1,7 @@
 from flask import Blueprint, render_template, abort, send_file, flash, redirect, url_for
 from app.models.interview import Interview, InterviewReport
 from app.services.pdf_report_service import PDFReportService
+from app.services.session_store import get_or_restore_report
 from app.extensions import db
 
 reports_bp = Blueprint("reports", __name__, url_prefix="/reports")
@@ -9,26 +10,26 @@ reports_bp = Blueprint("reports", __name__, url_prefix="/reports")
 @reports_bp.route("/<interview_id>")
 def view_report(interview_id: str):
     """View generated evaluation report."""
-    interview = db.session.get(Interview, interview_id)
+    interview, report = get_or_restore_report(interview_id)
     if not interview:
         abort(404, description="Interview not found.")
 
-    if not interview.report:
+    if not report:
         flash("No evaluation report is available for this interview yet.", "warning")
         return redirect(url_for("interviews.view_preparation", interview_id=interview.id))
 
     return render_template(
         "report.html",
         interview=interview,
-        report=interview.report
+        report=report
     )
 
 
 @reports_bp.route("/<interview_id>/download")
 def download_pdf(interview_id: str):
     """Download evaluation report as a styled PDF."""
-    interview = db.session.get(Interview, interview_id)
-    if not interview or not interview.report:
+    interview, report = get_or_restore_report(interview_id)
+    if not interview or not report:
         abort(404, description="Report not found.")
 
     pdf_buffer = PDFReportService.generate_pdf(interview, interview.report)

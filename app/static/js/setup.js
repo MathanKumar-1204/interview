@@ -100,6 +100,11 @@ document.addEventListener("DOMContentLoaded", () => {
       }
 
       const interviewId = uploadData.interview_id;
+      if (uploadData.interview) {
+        sessionStorage.setItem("interview_" + interviewId, JSON.stringify(uploadData.interview));
+        sessionStorage.setItem("current_interview", JSON.stringify(uploadData.interview));
+      }
+
       btnSpinner.textContent = "🤖 Generating Competency Plan...";
 
       // Step 2: Request structured interview planning
@@ -112,6 +117,11 @@ document.addEventListener("DOMContentLoaded", () => {
       });
 
       const planData = await planRes.json();
+      if (planData.interview) {
+        sessionStorage.setItem("interview_" + interviewId, JSON.stringify(planData.interview));
+        sessionStorage.setItem("current_interview", JSON.stringify(planData.interview));
+      }
+
       if (!planRes.ok) {
         // If planning fails, redirect to preparation page where error details are shown
         window.location.href = `/interviews/${interviewId}`;

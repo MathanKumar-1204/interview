@@ -29,7 +29,11 @@ except OSError:
 load_dotenv(BASE_DIR / ".env")
 
 DEFAULT_DB_PATH = (INSTANCE_DIR / "interview_studio.db").as_posix()
-raw_db_url = os.getenv("DATABASE_URL", "").strip()
+raw_db_url = (
+    os.getenv("DATABASE_URL", "").strip() or 
+    os.getenv("POSTGRES_URL", "").strip() or 
+    os.getenv("POSTGRES_URL_NON_POOLING", "").strip()
+)
 if not raw_db_url or "sqlite:///instance/" in raw_db_url or raw_db_url == "sqlite:///instance/interview_studio.db":
     RESOLVED_DB_URL = f"sqlite:///{DEFAULT_DB_PATH}"
 else:

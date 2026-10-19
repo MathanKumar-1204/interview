@@ -40,11 +40,41 @@
     {% endwith %}
 
     {% if error_title %}
-      <div class="card" style="text-align: center; padding: 3rem 1.5rem;">
+      <div class="card" style="text-align: center; padding: 3rem 1.5rem;" id="serverlessErrorCard">
         <h2 style="font-size: 1.8rem; margin-bottom: 0.5rem; color: var(--text-main);">{{ error_title }}</h2>
-        <p style="color: var(--text-secondary); margin-bottom: 1.5rem;">{{ error_message }}</p>
-        <a href="{{ url_for('dashboard.index') }}" class="btn btn-primary">Return to Dashboard</a>
+        <p style="color: var(--text-secondary); margin-bottom: 1.5rem;" id="errorMessageText">{{ error_message }}</p>
+        <div id="recoveryStatusNotice" style="display: none; margin-bottom: 1.5rem;">
+          <span style="font-size: 0.925rem; color: var(--primary); font-weight: 600;">🔄 Syncing interview state with serverless container...</span>
+        </div>
+        <a href="{{ url_for('dashboard.index') }}" class="btn btn-primary" id="returnDashboardBtn">Return to Dashboard</a>
       </div>
+      <script>
+        (async function autoRecoverServerlessSession() {
+          const path = window.location.pathname;
+          const match = path.match(/\/interviews\/([a-zA-Z0-9_-]+)/);
+          if (!match) return;
+          const interviewId = match[1];
+          let cached = sessionStorage.getItem("interview_" + interviewId) || sessionStorage.getItem("current_interview");
+          if (!cached) return;
+          try {
+            const data = JSON.parse(cached);
+            if (data.interview_id === interviewId || data.id === interviewId) {
+              const notice = document.getElementById("recoveryStatusNotice");
+              if (notice) notice.style.display = "block";
+              const res = await fetch("/api/interviews/restore", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(data)
+              });
+              if (res.ok) {
+                window.location.reload();
+              }
+            }
+          } catch (e) {
+            console.warn("Auto-recovery attempt failed:", e);
+          }
+        })();
+      </script>
     {% else %}
       {% block content %}{% endblock %}
     {% endif %}

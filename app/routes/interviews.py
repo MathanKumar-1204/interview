@@ -1,6 +1,7 @@
 from flask import Blueprint, render_template, abort, redirect, url_for, flash
 from app.models.interview import Interview, InterviewStatus
 from app.config import Config
+from app.services.session_store import get_or_restore_interview
 from app.extensions import db
 
 interviews_bp = Blueprint("interviews", __name__, url_prefix="/interviews")
@@ -21,7 +22,7 @@ def new_interview():
 @interviews_bp.route("/<interview_id>")
 def view_preparation(interview_id: str):
     """Interview preparation page showing extracted competencies, plan, and gaps."""
-    interview = db.session.get(Interview, interview_id)
+    interview = get_or_restore_interview(interview_id)
     if not interview:
         abort(404, description="Interview not found.")
 
@@ -40,7 +41,7 @@ def view_preparation(interview_id: str):
 @interviews_bp.route("/<interview_id>/live")
 def live_interview(interview_id: str):
     """Dedicated live conversational voice interview screen."""
-    interview = db.session.get(Interview, interview_id)
+    interview = get_or_restore_interview(interview_id)
     if not interview:
         abort(404, description="Interview not found.")
 

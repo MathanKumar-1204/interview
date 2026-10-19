@@ -1,0 +1,82 @@
+"""
+Cross-container session recovery service for serverless hosting (e.g. Vercel).
+Ensures interviews and reports survive across isolated Lambda execution environments.
+"""
+from typing import Optional, Tuple
+from flask import session
+from app.models.interview import Interview, InterviewReport, InterviewStatus
+from app.extensions import db
+
+DEFAULT_CONTENT_CREATOR_JOB_TITLE = "Content Creator / Content Writer"
+DEFAULT_CONTENT_CREATOR_JD = (
+    "Role: Content Creator & Content Writer. Plan, write, and edit high-impact articles, "
+    "social copy, and newsletters. Conduct audience search intent and keyword optimization. "
+    "Maintain brand voice consistency and track engagement metrics."
+)
+
+
+def get_or_restore_interview(interview_id: str) -> Optional[Interview]:
+    """Retrieve interview from database, or restore from signed session cookie on serverless cold-starts."""
+    interview = db.session.get(Interview, interview_id)
+    if interview:
+        return interview
+
+    cached = session.get("active_interview")
+    if cached and (cached.get("id") == interview_id or cached.get("interview_id") == interview_id):
+        try:
+            restored = Interview(
+                id=interview_id,
+                candidate_name=cached.get("candidate_name", "Candidate"),
+                candidate_email=cached.get("candidate_email"),
+                job_title=cached.get("job_title", DEFAULT_CONTENT_CREATOR_JOB_TITLE),
+                jd_text=cached.get("jd_text") or DEFAULT_CONTENT_CREATOR_JD,
+                resume_text=cached.get("resume_text", ""),
+                duration_minutes=int(cached.get("duration_minutes", 15)),
+                difficulty=cached.get("difficulty", "Intermediate"),
+                language=cached.get("language", "English"),
+                interview_plan=cached.get("interview_plan"),
+                transcript=cached.get("transcript", []),
+                status=cached.get("status", InterviewStatus.PREPARED)
+            )
+            db.session.add(restored)
+            db.session.commit()
+            return restored
+        except Exception:
+            db.session.rollback()
+
+    return None
+
+
+def get_or_restore_report(interview_id: str) -> Tuple[Optional[Interview], Optional[InterviewReport]]:
+    """Retrieve interview and its report, restoring from signed session if missing."""
+    interview = get_or_restore_interview(interview_id)
+    if not interview:
+        return None, None
+
+    if interview.report:
+        return interview, interview.report
+
+    cached_rep = session.get("active_report")
+    if cached_rep and cached_rep.get("interview_id") == interview_id:
+        try:
+            report = InterviewReport(
+                id=cached_rep.get("id"),
+                interview_id=interview_id,
+                overall_score=cached_rep.get("overall_score", 75),
+                overall_summary=cached_rep.get("overall_summary", ""),
+                competency_scores=cached_rep.get("competency_scores", []),
+                strengths=cached_rep.get("strengths", []),
+                improvement_areas=cached_rep.get("improvement_areas", []),
+                evidence=cached_rep.get("evidence", []),
+                suggested_practice_questions=cached_rep.get("suggested_practice_questions", []),
+                recommendations=cached_rep.get("recommendations", []),
+                assessment_limitations=cached_rep.get("assessment_limitations", "")
+            )
+            db.session.add(report)
+            interview.status = InterviewStatus.COMPLETED
+            db.session.commit()
+            return interview, report
+        except Exception:
+            db.session.rollback()
+
+    return interview, None

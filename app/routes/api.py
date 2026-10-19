@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from flask import Blueprint, request, jsonify, url_for
+from flask import Blueprint, request, jsonify, url_for, session
 from app.models.interview import Interview, InterviewStatus, InterviewEvent
 from app.services.document_parser import DocumentParserService, DocumentParsingError, ScannedDocumentError
 from app.services.interview_planner import InterviewPlannerService
@@ -7,6 +7,7 @@ from app.services.elevenlabs_service import ElevenLabsService, ElevenLabsConfigE
 from app.services.transcript_service import TranscriptService, TranscriptValidationError
 from app.services.evaluation_service import EvaluationService
 from app.services.llm_service import LLMConfigError, LLMExecutionError
+from app.services.session_store import get_or_restore_interview
 from app.extensions import db
 
 api_bp = Blueprint("api", __name__, url_prefix="/api")
@@ -93,9 +94,23 @@ def create_interview():
         db.session.add(event)
         db.session.commit()
 
+        session["active_interview"] = {
+            "id": interview.id,
+            "interview_id": interview.id,
+            "candidate_name": candidate_name,
+            "candidate_email": candidate_email,
+            "job_title": job_title,
+            "duration_minutes": duration,
+            "difficulty": difficulty,
+            "language": language,
+            "status": interview.status
+        }
+        session.modified = True
+
         return jsonify({
             "success": True,
             "interview_id": interview.id,
+            "interview": session["active_interview"],
             "redirect_url": url_for("interviews.view_preparation", interview_id=interview.id)
         }), 201
 
@@ -107,7 +122,7 @@ def create_interview():
 @api_bp.route("/interviews/<interview_id>/prepare", methods=["POST"])
 def prepare_interview(interview_id: str):
     """Generate structured interview plan from JD and Resume using the LLM."""
-    interview = db.session.get(Interview, interview_id)
+    interview = get_or_restore_interview(interview_id)
     if not interview:
         return jsonify({"error": "Interview not found."}), 404
 
@@ -138,10 +153,25 @@ def prepare_interview(interview_id: str):
         db.session.add(event)
         db.session.commit()
 
+        session["active_interview"] = {
+            "id": interview.id,
+            "interview_id": interview.id,
+            "candidate_name": interview.candidate_name,
+            "candidate_email": interview.candidate_email,
+            "job_title": interview.job_title,
+            "duration_minutes": interview.duration_minutes,
+            "difficulty": interview.difficulty,
+            "language": interview.language,
+            "interview_plan": plan_dict,
+            "status": interview.status
+        }
+        session.modified = True
+
         return jsonify({
             "success": True,
             "status": interview.status,
-            "plan": plan_dict
+            "plan": plan_dict,
+            "interview": session["active_interview"]
         })
 
     except LLMConfigError as lce:
@@ -157,7 +187,7 @@ def prepare_interview(interview_id: str):
 @api_bp.route("/interviews/<interview_id>/update-title", methods=["POST"])
 def update_job_title(interview_id: str):
     """Update job title during preparation."""
-    interview = db.session.get(Interview, interview_id)
+    interview = get_or_restore_interview(interview_id)
     if not interview:
         return jsonify({"error": "Interview not found."}), 404
 
@@ -172,6 +202,10 @@ def update_job_title(interview_id: str):
         interview.interview_plan = plan
 
     db.session.commit()
+    if "active_interview" in session and session["active_interview"].get("id") == interview.id:
+        session["active_interview"]["job_title"] = new_title
+        session.modified = True
+
     return jsonify({"success": True, "job_title": interview.job_title})
 
 
@@ -181,7 +215,7 @@ def get_conversation_credentials(interview_id: str):
     Secure endpoint providing ephemeral credentials or signed WebSocket URL for ElevenLabs.
     Never returns ELEVENLABS_API_KEY.
     """
-    interview = db.session.get(Interview, interview_id)
+    interview = get_or_restore_interview(interview_id)
     if not interview:
         return jsonify({"error": "Interview not found."}), 404
 
@@ -220,7 +254,7 @@ def get_interview_context(interview_id: str):
     Protected endpoint for ElevenLabs agent tool call / context retrieval.
     Supplies the agent with role requirements, candidate background summary, and planned sections.
     """
-    interview = db.session.get(Interview, interview_id)
+    interview = get_or_restore_interview(interview_id)
     if not interview:
         return jsonify({"error": "Interview not found."}), 404
 
@@ -241,7 +275,7 @@ def get_interview_context(interview_id: str):
 @api_bp.route("/interviews/<interview_id>/transcript", methods=["POST"])
 def sync_transcript(interview_id: str):
     """Client-side transcript synchronization."""
-    interview = db.session.get(Interview, interview_id)
+    interview = get_or_restore_interview(interview_id)
     if not interview:
         return jsonify({"error": "Interview not found."}), 404
 
@@ -262,7 +296,7 @@ def sync_transcript(interview_id: str):
 @api_bp.route("/interviews/<interview_id>/end", methods=["POST"])
 def end_interview(interview_id: str):
     """Record that the interview session has ended."""
-    interview = db.session.get(Interview, interview_id)
+    interview = get_or_restore_interview(interview_id)
     if not interview:
         return jsonify({"error": "Interview not found."}), 404
 
@@ -297,7 +331,7 @@ def finalize_interview(interview_id: str):
     2. Runs EvaluationService against rubric.
     3. Persists InterviewReport and marks COMPLETED.
     """
-    interview = db.session.get(Interview, interview_id)
+    interview = get_or_restore_interview(interview_id)
     if not interview:
         return jsonify({"error": "Interview not found."}), 404
 
@@ -325,6 +359,9 @@ def finalize_interview(interview_id: str):
         interview.status = InterviewStatus.COMPLETED
         interview.error_message = None
         db.session.commit()
+
+        session["active_report"] = report.to_dict()
+        session.modified = True
 
         return jsonify({
             "success": True,
@@ -394,3 +431,54 @@ def delete_interview(interview_id: str):
     db.session.delete(interview)
     db.session.commit()
     return jsonify({"success": True, "message": "Interview deleted successfully."})
+
+
+@api_bp.route("/interviews/restore", methods=["POST"])
+def restore_interview():
+    """Endpoint allowing client to restore interview state into an ephemeral serverless container."""
+    data = request.get_json(silent=True) or {}
+    interview_id = data.get("interview_id") or data.get("id")
+    if not interview_id:
+        return jsonify({"error": "interview_id is required."}), 400
+
+    existing = db.session.get(Interview, interview_id)
+    if existing:
+        return jsonify({"success": True, "restored": False, "status": existing.status})
+
+    try:
+        restored = Interview(
+            id=interview_id,
+            candidate_name=data.get("candidate_name", "Candidate"),
+            candidate_email=data.get("candidate_email"),
+            job_title=data.get("job_title", DEFAULT_CONTENT_CREATOR_JOB_TITLE),
+            jd_text=data.get("jd_text", DEFAULT_CONTENT_CREATOR_JD),
+            resume_text=data.get("resume_text", ""),
+            duration_minutes=int(data.get("duration_minutes", 15)),
+            difficulty=data.get("difficulty", "Intermediate"),
+            language=data.get("language", "English"),
+            interview_plan=data.get("interview_plan"),
+            transcript=data.get("transcript", []),
+            status=data.get("status", InterviewStatus.PREPARED)
+        )
+        db.session.add(restored)
+        db.session.commit()
+
+        session["active_interview"] = {
+            "id": restored.id,
+            "interview_id": restored.id,
+            "candidate_name": restored.candidate_name,
+            "candidate_email": restored.candidate_email,
+            "job_title": restored.job_title,
+            "duration_minutes": restored.duration_minutes,
+            "difficulty": restored.difficulty,
+            "language": restored.language,
+            "interview_plan": restored.interview_plan,
+            "status": restored.status
+        }
+        session.modified = True
+
+        return jsonify({"success": True, "restored": True, "status": restored.status})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": f"Failed to restore interview: {str(e)}"}), 500
+
