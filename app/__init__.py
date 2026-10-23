@@ -102,3 +102,13 @@ def create_app(config_name: str = "development") -> Flask:
         app.logger.warning(f"Database initialization warning: {db_err}")
 
     return app
+
+
+# Default top-level application instance for Vercel, WSGI servers, and CLI runners
+_default_env = os.getenv("FLASK_ENV", "production")
+if os.getenv("FLASK_ENV") != "testing":
+    try:
+        app = create_app(_default_env)
+    except Exception:
+        app = None
+

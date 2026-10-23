@@ -1,22 +1,18 @@
 import os
 import sys
-import traceback
+from pathlib import Path
+
+# Add project root directory to sys.path so 'app' package resolves cleanly
+ROOT_DIR = Path(__file__).resolve().parent
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
+from flask import Flask
 from app import create_app
 
-try:
-    env = os.getenv("FLASK_ENV", "production")
-    app = create_app(env)
-except Exception as exc:
-    err_trace = traceback.format_exc()
-    print(f"[Startup Error] {err_trace}", file=sys.stderr)
-    from flask import Flask, Response
-
-    app = Flask(__name__)
-
-    @app.route("/", defaults={"path": ""})
-    @app.route("/<path:path>")
-    def startup_error(path):
-        return Response(f"<pre>{err_trace}</pre>", status=500, mimetype="text/html")
+# Top-level Flask application instance for Vercel and WSGI servers
+env = os.getenv("FLASK_ENV", "production")
+app: Flask = create_app(env)
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 5000))
