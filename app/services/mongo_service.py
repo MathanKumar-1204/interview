@@ -6,8 +6,14 @@ import os
 import uuid
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any, Union
-import pymongo
-from bson import ObjectId
+try:
+    import pymongo
+    from bson import ObjectId
+    HAS_PYMONGO = True
+except ImportError:
+    pymongo = None
+    ObjectId = None
+    HAS_PYMONGO = False
 from werkzeug.security import generate_password_hash, check_password_hash
 from app.config import Config
 
@@ -15,9 +21,11 @@ from app.config import Config
 _mongo_client: Optional[pymongo.MongoClient] = None
 
 
-def get_mongo_client() -> Optional[pymongo.MongoClient]:
+def get_mongo_client() -> Optional[Any]:
     """Get or initialize singleton MongoClient."""
     global _mongo_client
+    if not HAS_PYMONGO:
+        return None
     uri = Config.MONGO_URI or os.getenv("MONGO_URI", "")
     if not uri:
         return None
@@ -88,7 +96,7 @@ class MongoUser:
         if db is None or not user_id:
             return None
         query = {"_id": user_id}
-        if ObjectId.is_valid(user_id):
+        if ObjectId and ObjectId.is_valid(user_id):
             query = {"$or": [{"_id": ObjectId(user_id)}, {"_id": user_id}]}
         doc = db.users.find_one(query)
         return cls(doc) if doc else None

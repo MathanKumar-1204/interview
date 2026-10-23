@@ -79,23 +79,26 @@ def create_app(config_name: str = "development") -> Flask:
         return render_template("base.html", error_title="500 - Internal Server Error", error_message="An unexpected server error occurred."), 500
 
     # Auto-create tables in development and testing, ensuring SQLite columns are synchronized
-    with app.app_context():
-        db.create_all()
-        # Safe migration for existing SQLite database files if columns are missing
-        try:
-            from sqlalchemy import text
-            with db.engine.connect() as conn:
-                res = conn.execute(text("PRAGMA table_info(interviews)"))
-                cols = [r[1] for r in res.fetchall()]
-                if cols:
-                    if "llm_provider" not in cols:
-                        conn.execute(text("ALTER TABLE interviews ADD COLUMN llm_provider VARCHAR(50) DEFAULT 'gemini'"))
-                    if "voice_engine" not in cols:
-                        conn.execute(text("ALTER TABLE interviews ADD COLUMN voice_engine VARCHAR(50) DEFAULT 'elevenlabs'"))
-                    if "user_id" not in cols:
-                        conn.execute(text("ALTER TABLE interviews ADD COLUMN user_id VARCHAR(100) DEFAULT NULL"))
-                    conn.commit()
-        except Exception:
-            pass
+    try:
+        with app.app_context():
+            db.create_all()
+            # Safe migration for existing SQLite database files if columns are missing
+            try:
+                from sqlalchemy import text
+                with db.engine.connect() as conn:
+                    res = conn.execute(text("PRAGMA table_info(interviews)"))
+                    cols = [r[1] for r in res.fetchall()]
+                    if cols:
+                        if "llm_provider" not in cols:
+                            conn.execute(text("ALTER TABLE interviews ADD COLUMN llm_provider VARCHAR(50) DEFAULT 'gemini'"))
+                        if "voice_engine" not in cols:
+                            conn.execute(text("ALTER TABLE interviews ADD COLUMN voice_engine VARCHAR(50) DEFAULT 'elevenlabs'"))
+                        if "user_id" not in cols:
+                            conn.execute(text("ALTER TABLE interviews ADD COLUMN user_id VARCHAR(100) DEFAULT NULL"))
+                        conn.commit()
+            except Exception as mig_err:
+                app.logger.debug(f"Migration check skipped: {mig_err}")
+    except Exception as db_err:
+        app.logger.warning(f"Database initialization warning: {db_err}")
 
     return app
