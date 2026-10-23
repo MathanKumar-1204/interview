@@ -31,9 +31,14 @@
         </div>
 
         <div class="form-group">
-          <label class="form-label" for="candidate_email">Candidate Email (Optional)</label>
-          <input type="email" id="candidate_email" name="candidate_email" class="form-input" placeholder="e.g. maya.chen@example.com">
+          <label class="form-label" for="job_title">Target Job Title <span class="required">*</span></label>
+          <input type="text" id="job_title" name="job_title" class="form-input" value="Content Creator & Content Writer" placeholder="e.g. Content Creator & Content Writer" required>
         </div>
+      </div>
+
+      <div class="form-group" style="margin-top: 0.25rem;">
+        <label class="form-label" for="candidate_email">Candidate Email (Optional)</label>
+        <input type="email" id="candidate_email" name="candidate_email" class="form-input" placeholder="e.g. maya.chen@example.com">
       </div>
 
       <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1.25rem;">
@@ -66,6 +71,66 @@
 
       <div style="padding: 0.75rem 1rem; background: var(--bg-main); border: 1px solid var(--border-color); border-radius: var(--radius-md); font-size: 0.85rem; color: var(--text-secondary); margin-top: 0.5rem;">
         <b>Target Position:</b> Content Creator & Content Writer • Focuses on Content Strategy, SEO & Audience Research, Brand Voice Adaptation, and Performance Analytics.
+      </div>
+
+      <!-- Selected Studio Engines (Configured on Dashboard) -->
+      <div style="margin-top: 1.25rem; padding: 1rem 1.25rem; background: var(--bg-main); border: 1.5px solid var(--border-color); border-radius: var(--radius-md); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem;">
+        <div>
+          <div style="font-size: 0.725rem; font-weight: 700; text-transform: uppercase; color: var(--text-muted); margin-bottom: 0.35rem;">
+            ⚙️ Active Studio Engines (Configured on Dashboard)
+          </div>
+          <div style="display: flex; gap: 0.65rem; align-items: center; flex-wrap: wrap;">
+            <span class="badge badge-indigo" style="font-size: 0.85rem; padding: 0.35rem 0.75rem;">
+              🧠 Assessment: 
+              {% if preferred_llm == 'openai' %}OpenAI (GPT-4o Mini)
+              {% elif preferred_llm == 'claude' %}Claude (Claude 3.5 Sonnet)
+              {% elif preferred_llm == 'mock' %}Simulated Mock
+              {% else %}Google Gemini (Gemini 3.8 Flash){% endif %}
+            </span>
+            <span class="badge badge-emerald" style="font-size: 0.85rem; padding: 0.35rem 0.75rem;">
+              🎙️ Voice: 
+              {% if preferred_voice == 'elevenlabs' %}ElevenLabs Conversational AI
+              {% else %}Gemini Flash Live Voice{% endif %}
+            </span>
+          </div>
+        </div>
+        <a href="{{ url_for('dashboard.index') }}" style="font-size: 0.825rem; color: var(--primary); text-decoration: underline; font-weight: 600;">
+          Change on Dashboard ↗
+        </a>
+        <input type="hidden" name="llm_provider" value="{{ preferred_llm }}">
+        <input type="hidden" name="voice_engine" value="{{ preferred_voice }}">
+      </div>
+    </div>
+
+    <!-- Job Description (JD) Card -->
+    <div class="card">
+      <div class="card-header">
+        <h2 class="card-title">📋 Job Description (JD)</h2>
+        <span class="badge badge-indigo">Upload File or Paste Text</span>
+      </div>
+
+      <div style="margin-bottom: 0.5rem;">
+        <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.85rem;">
+          Add a customized Job Description to tailor interview competencies and questions. If left blank, the built-in <b>Content Creator & Content Writer</b> job description is used by default.
+        </p>
+
+        <!-- Dropzone for JD File -->
+        <div class="form-group" style="margin-bottom: 1rem;">
+          <label class="form-label" for="jd_file">Upload Job Description Document (Optional)</label>
+          <div class="file-dropzone" id="jdDropzone" style="padding: 1.25rem;">
+            <input type="file" id="jd_file" name="jd_file" accept=".pdf,.docx,.txt">
+            <div class="dropzone-icon" style="font-size: 1.5rem; margin-bottom: 0.25rem;">📄</div>
+            <div style="font-weight: 600; font-size: 0.9rem; margin-bottom: 0.2rem;">Drag & drop JD here, or browse</div>
+            <div style="font-size: 0.775rem; color: var(--text-secondary);">PDF, DOCX, or TXT format (Max 10 MB)</div>
+            <div class="file-preview" id="jdPreview" style="display: none;"></div>
+          </div>
+        </div>
+
+        <!-- Textarea for JD Text -->
+        <div class="form-group" style="margin-bottom: 0.5rem;">
+          <label class="form-label" for="jd_text">Or Paste Job Description Text (Optional)</label>
+          <textarea id="jd_text" name="jd_text" class="form-input" rows="4" placeholder="Paste role responsibilities, required skills, and qualifications here..."></textarea>
+        </div>
       </div>
     </div>
 

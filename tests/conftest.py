@@ -28,7 +28,18 @@ def app():
 
 @pytest.fixture
 def client(app):
-    """Test client fixture."""
+    """Test client fixture with authenticated session."""
+    c = app.test_client()
+    with c.session_transaction() as sess:
+        sess["user_id"] = "test-user-123"
+        sess["user_name"] = "Test User"
+        sess["user_email"] = "test@example.com"
+    return c
+
+
+@pytest.fixture
+def unauth_client(app):
+    """Unauthenticated test client fixture."""
     return app.test_client()
 
 
@@ -84,6 +95,8 @@ def prepared_interview(app):
         resume_text="Senior Content Writer with 4 years experience at TechPublish. Strong SEO, CMS, and storytelling expertise.",
         duration_minutes=15,
         difficulty="Intermediate",
+        llm_provider="mock",
+        voice_engine="elevenlabs",
         status=InterviewStatus.PREPARED,
         interview_plan={
             "job_title": "Content Creator",

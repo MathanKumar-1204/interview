@@ -1,13 +1,16 @@
 from datetime import datetime, timezone
-from flask import Blueprint, request, jsonify, url_for, session
+from flask import Blueprint, request, jsonify, url_for, session, current_app, has_app_context
 from app.models.interview import Interview, InterviewStatus, InterviewEvent
 from app.services.document_parser import DocumentParserService, DocumentParsingError, ScannedDocumentError
 from app.services.interview_planner import InterviewPlannerService
 from app.services.elevenlabs_service import ElevenLabsService, ElevenLabsConfigError, ElevenLabsAPIError
 from app.services.transcript_service import TranscriptService, TranscriptValidationError
 from app.services.evaluation_service import EvaluationService
-from app.services.llm_service import LLMConfigError, LLMExecutionError
+from app.services.llm_service import LLMService, LLMConfigError, LLMExecutionError
+from app.services.gemini_live_service import GeminiLiveService
 from app.services.session_store import get_or_restore_interview
+from app.services.mongo_service import MongoInterview, MongoInterviewReport
+from app.config import Config
 from app.extensions import db
 
 api_bp = Blueprint("api", __name__, url_prefix="/api")
@@ -30,6 +33,18 @@ def create_interview():
     duration = int(request.form.get("duration_minutes", 15))
     difficulty = request.form.get("difficulty", "Intermediate").strip()
     language = request.form.get("language", "English").strip()
+    
+    # Model & Engine selection (defaults to dashboard user preference)
+    pref_llm = session.get("preferred_llm_provider")
+    default_llm = pref_llm or (current_app.config.get("LLM_PROVIDER") if has_app_context() else Config.LLM_PROVIDER)
+    llm_provider = request.form.get("llm_provider", default_llm or "gemini").strip().lower()
+    if llm_provider not in ("gemini", "openai", "claude", "mock"):
+        llm_provider = default_llm if default_llm in ("gemini", "openai", "claude", "mock") else "gemini"
+
+    pref_voice = session.get("preferred_voice_engine", "gemini_live")
+    voice_engine = request.form.get("voice_engine", pref_voice).strip().lower()
+    if voice_engine not in ("elevenlabs", "gemini_live"):
+        voice_engine = pref_voice if pref_voice in ("elevenlabs", "gemini_live") else "gemini_live"
 
     if not candidate_name:
         return jsonify({"error": "Candidate name is required."}), 400
@@ -58,20 +73,24 @@ def create_interview():
 
     if jd_file and jd_file.filename:
         valid_jd, err_jd = DocumentParserService.validate_file(jd_file)
-        if valid_jd:
-            try:
-                extracted_jd = DocumentParserService.extract_text(jd_file)
-                jd_filename = jd_file.filename
-                jd_text = f"{jd_text_input}\n\n{extracted_jd}" if jd_text_input else extracted_jd
-            except Exception:
-                pass
+        if not valid_jd:
+            return jsonify({"error": f"Job description file error: {err_jd}"}), 400
+        try:
+            extracted_jd = DocumentParserService.extract_text(jd_file)
+            jd_filename = jd_file.filename
+            jd_text = f"{jd_text_input}\n\n{extracted_jd}" if jd_text_input else extracted_jd
+        except (ScannedDocumentError, DocumentParsingError) as e:
+            return jsonify({"error": f"Job description extraction error: {str(e)}"}), 422
     elif jd_text_input:
         jd_text = jd_text_input
 
+    user_id = session.get("user_id")
     try:
+        user_id_str = str(user_id) if user_id else None
         interview = Interview(
             candidate_name=candidate_name,
             candidate_email=candidate_email,
+            user_id=user_id_str,
             job_title=job_title,
             jd_text=jd_text,
             resume_text=resume_text,
@@ -80,16 +99,27 @@ def create_interview():
             duration_minutes=duration,
             difficulty=difficulty,
             language=language,
+            llm_provider=llm_provider,
+            voice_engine=voice_engine,
             status=InterviewStatus.DRAFT
         )
         db.session.add(interview)
         db.session.commit()
 
+        # Save to MongoDB for persistent multi-device storage
+        if Config.is_mongo_configured():
+            try:
+                m_doc = MongoInterview(interview.to_dict())
+                m_doc.user_id = user_id_str
+                m_doc.save()
+            except Exception as me:
+                print(f"[API] Error saving interview to Mongo: {me}")
+
         # Log creation event
         event = InterviewEvent(
             interview_id=interview.id,
             event_type="interview_created",
-            event_data={"candidate_name": candidate_name, "job_title": job_title}
+            event_data={"candidate_name": candidate_name, "job_title": job_title, "llm_provider": llm_provider, "voice_engine": voice_engine}
         )
         db.session.add(event)
         db.session.commit()
@@ -97,12 +127,15 @@ def create_interview():
         session["active_interview"] = {
             "id": interview.id,
             "interview_id": interview.id,
+            "user_id": user_id,
             "candidate_name": candidate_name,
             "candidate_email": candidate_email,
             "job_title": job_title,
             "duration_minutes": duration,
             "difficulty": difficulty,
             "language": language,
+            "llm_provider": interview.llm_provider,
+            "voice_engine": interview.voice_engine,
             "status": interview.status
         }
         session.modified = True
@@ -126,8 +159,8 @@ def prepare_interview(interview_id: str):
     if not interview:
         return jsonify({"error": "Interview not found."}), 404
 
-    # Allow re-planning if in draft or prepared
-    planner = InterviewPlannerService()
+    # Allow re-planning if in draft or prepared using selected LLM provider
+    planner = InterviewPlannerService(llm_service=LLMService(provider=interview.llm_provider))
     try:
         plan_schema = planner.generate_plan(
             candidate_name=interview.candidate_name,
@@ -144,6 +177,20 @@ def prepare_interview(interview_id: str):
         interview.job_title = plan_dict.get("job_title", interview.job_title)
         interview.status = InterviewStatus.PREPARED
         interview.error_message = None
+
+        if isinstance(interview, MongoInterview):
+            interview.save()
+        else:
+            db.session.commit()
+            if Config.is_mongo_configured():
+                try:
+                    m_doc = MongoInterview.find_by_id(interview.id) or MongoInterview(interview.to_dict())
+                    m_doc.interview_plan = plan_dict
+                    m_doc.job_title = interview.job_title
+                    m_doc.status = interview.status
+                    m_doc.save()
+                except Exception:
+                    pass
 
         event = InterviewEvent(
             interview_id=interview.id,
@@ -162,6 +209,8 @@ def prepare_interview(interview_id: str):
             "duration_minutes": interview.duration_minutes,
             "difficulty": interview.difficulty,
             "language": interview.language,
+            "llm_provider": interview.llm_provider,
+            "voice_engine": interview.voice_engine,
             "interview_plan": plan_dict,
             "status": interview.status
         }
@@ -201,7 +250,20 @@ def update_job_title(interview_id: str):
         plan["job_title"] = new_title
         interview.interview_plan = plan
 
-    db.session.commit()
+    if isinstance(interview, MongoInterview):
+        interview.save()
+    else:
+        db.session.commit()
+        if Config.is_mongo_configured():
+            try:
+                m_doc = MongoInterview.find_by_id(interview.id)
+                if m_doc:
+                    m_doc.job_title = new_title
+                    m_doc.interview_plan = interview.interview_plan
+                    m_doc.save()
+            except Exception:
+                pass
+
     if "active_interview" in session and session["active_interview"].get("id") == interview.id:
         session["active_interview"]["job_title"] = new_title
         session.modified = True
@@ -209,11 +271,64 @@ def update_job_title(interview_id: str):
     return jsonify({"success": True, "job_title": interview.job_title})
 
 
+@api_bp.route("/interviews/<interview_id>/voice-engine", methods=["POST"])
+def update_voice_engine(interview_id: str):
+    """Update selected live voice interview engine ('elevenlabs' or 'gemini_live')."""
+    interview = get_or_restore_interview(interview_id)
+    if not interview:
+        return jsonify({"error": "Interview not found."}), 404
+
+    data = request.get_json(silent=True) or {}
+    engine = data.get("voice_engine", "").strip().lower()
+    if engine not in ("elevenlabs", "gemini_live"):
+        return jsonify({"error": "Invalid voice engine. Must be 'elevenlabs' or 'gemini_live'."}), 400
+
+    interview.voice_engine = engine
+    if isinstance(interview, MongoInterview):
+        interview.save()
+    else:
+        db.session.commit()
+        if Config.is_mongo_configured():
+            try:
+                m_doc = MongoInterview.find_by_id(interview.id)
+                if m_doc:
+                    m_doc.voice_engine = engine
+                    m_doc.save()
+            except Exception:
+                pass
+
+    if "active_interview" in session and session["active_interview"].get("id") == interview.id:
+        session["active_interview"]["voice_engine"] = engine
+        session.modified = True
+
+    return jsonify({"success": True, "voice_engine": interview.voice_engine})
+
+
+@api_bp.route("/user/preferences", methods=["POST"])
+def update_user_preferences():
+    """Save user preferred LLM provider and voice engine chosen from the dashboard dropdowns."""
+    data = request.get_json(silent=True) or {}
+    llm = data.get("llm_provider", "").strip().lower()
+    voice = data.get("voice_engine", "").strip().lower()
+
+    if llm in ("gemini", "openai", "claude", "mock"):
+        session["preferred_llm_provider"] = llm
+    if voice in ("gemini_live", "elevenlabs"):
+        session["preferred_voice_engine"] = voice
+    session.modified = True
+
+    return jsonify({
+        "success": True,
+        "llm_provider": session.get("preferred_llm_provider", "gemini"),
+        "voice_engine": session.get("preferred_voice_engine", "gemini_live")
+    })
+
+
 @api_bp.route("/interviews/<interview_id>/conversation-credentials", methods=["GET"])
 def get_conversation_credentials(interview_id: str):
     """
-    Secure endpoint providing ephemeral credentials or signed WebSocket URL for ElevenLabs.
-    Never returns ELEVENLABS_API_KEY.
+    Secure endpoint providing credentials for ElevenLabs or Gemini Flash Live.
+    Never returns private API keys to the client.
     """
     interview = get_or_restore_interview(interview_id)
     if not interview:
@@ -224,6 +339,33 @@ def get_conversation_credentials(interview_id: str):
             "error": f"Interview is in '{interview.status}' status and cannot be started. Please prepare the interview first."
         }), 400
 
+    # Gemini Flash Live engine branch
+    if interview.voice_engine == "gemini_live":
+        if not Config.is_gemini_live_configured():
+            return jsonify({
+                "error": "Gemini Live Voice is not configured. Please ensure GEMINI_API_KEY is configured in your .env file."
+            }), 503
+
+        try:
+            live_service = GeminiLiveService()
+            greeting = live_service.get_initial_greeting(interview)
+
+            if interview.status != InterviewStatus.IN_PROGRESS:
+                interview.status = InterviewStatus.IN_PROGRESS
+                interview.started_at = datetime.now(timezone.utc)
+                db.session.commit()
+
+            return jsonify({
+                "success": True,
+                "voice_engine": "gemini_live",
+                "candidate_name": interview.candidate_name,
+                "job_title": interview.job_title,
+                "greeting": greeting
+            })
+        except Exception as e:
+            return jsonify({"error": f"Failed to initialize Gemini Live session: {str(e)}"}), 500
+
+    # ElevenLabs engine branch
     service = ElevenLabsService()
     try:
         credentials = service.get_conversation_credentials(
@@ -238,7 +380,7 @@ def get_conversation_credentials(interview_id: str):
             interview.started_at = datetime.now(timezone.utc)
             db.session.commit()
 
-        return jsonify({"success": True, **credentials})
+        return jsonify({"success": True, "voice_engine": "elevenlabs", **credentials})
 
     except ElevenLabsConfigError as ece:
         return jsonify({"error": str(ece)}), 503
@@ -246,6 +388,27 @@ def get_conversation_credentials(interview_id: str):
         return jsonify({"error": f"ElevenLabs connection failure: {str(eae)}"}), 502
     except Exception as e:
         return jsonify({"error": f"Failed to initialize conversation: {str(e)}"}), 500
+
+
+@api_bp.route("/interviews/<interview_id>/gemini-live/turn", methods=["POST"])
+def gemini_live_turn(interview_id: str):
+    """Processes candidate spoken turn and returns Alex's conversational spoken response using Gemini."""
+    interview = get_or_restore_interview(interview_id)
+    if not interview:
+        return jsonify({"error": "Interview not found."}), 404
+
+    data = request.get_json(silent=True) or {}
+    candidate_message = data.get("candidate_message", "").strip()
+    history = data.get("history", [])
+
+    if not candidate_message:
+        return jsonify({"error": "Candidate message is required."}), 400
+
+    print(f"[GeminiLive] Processing candidate turn for interview {interview_id}: '{candidate_message}'")
+    service = GeminiLiveService()
+    reply = service.process_turn(interview, candidate_message, history)
+    print(f"[GeminiLive] Alex response: '{reply.get('message', '')}'")
+    return jsonify({"success": True, "turn": reply})
 
 
 @api_bp.route("/interviews/<interview_id>/context", methods=["GET"])
@@ -289,7 +452,20 @@ def sync_transcript(interview_id: str):
     if turns and isinstance(turns, list):
         interview.transcript = turns
 
-    db.session.commit()
+    if isinstance(interview, MongoInterview):
+        interview.save()
+    else:
+        db.session.commit()
+        if Config.is_mongo_configured():
+            try:
+                m_doc = MongoInterview.find_by_id(interview.id) or MongoInterview(interview.to_dict())
+                m_doc.transcript = turns
+                if conversation_id:
+                    m_doc.elevenlabs_conversation_id = conversation_id
+                m_doc.save()
+            except Exception:
+                pass
+
     return jsonify({"success": True, "turns_count": len(interview.transcript or [])})
 
 
@@ -312,13 +488,25 @@ def end_interview(interview_id: str):
     else:
         interview.status = InterviewStatus.AWAITING_FINALIZATION
 
-    event = InterviewEvent(
-        interview_id=interview.id,
-        event_type="interview_ended",
-        event_data={"reason": reason, "conversation_id": conversation_id}
-    )
-    db.session.add(event)
-    db.session.commit()
+    if isinstance(interview, MongoInterview):
+        interview.save()
+    else:
+        event = InterviewEvent(
+            interview_id=interview.id,
+            event_type="interview_ended",
+            event_data={"reason": reason, "conversation_id": conversation_id}
+        )
+        db.session.add(event)
+        db.session.commit()
+        if Config.is_mongo_configured():
+            try:
+                m_doc = MongoInterview.find_by_id(interview.id) or MongoInterview(interview.to_dict())
+                m_doc.status = interview.status
+                if conversation_id:
+                    m_doc.elevenlabs_conversation_id = conversation_id
+                m_doc.save()
+            except Exception:
+                pass
 
     return jsonify({"success": True, "status": interview.status})
 
@@ -329,7 +517,7 @@ def finalize_interview(interview_id: str):
     Idempotent finalization endpoint:
     1. Ingests transcript from ElevenLabs API or client payload.
     2. Runs EvaluationService against rubric.
-    3. Persists InterviewReport and marks COMPLETED.
+    3. Persists InterviewReport and marks COMPLETED in MongoDB.
     """
     interview = get_or_restore_interview(interview_id)
     if not interview:
@@ -351,16 +539,30 @@ def finalize_interview(interview_id: str):
     ts_service = TranscriptService()
     ts_service.sync_transcript(interview, conversation_id=conv_id, client_transcript=client_turns)
 
-    # Evaluate
-    eval_service = EvaluationService()
+    # Evaluate with interview's selected LLM provider
+    eval_service = EvaluationService(llm_service=LLMService(provider=interview.llm_provider))
     try:
         report = eval_service.evaluate_interview(interview)
         interview.completed_at = datetime.now(timezone.utc)
         interview.status = InterviewStatus.COMPLETED
         interview.error_message = None
-        db.session.commit()
 
-        session["active_report"] = report.to_dict()
+        if isinstance(interview, MongoInterview):
+            interview.report = MongoInterviewReport(report.to_dict() if hasattr(report, "to_dict") else report)
+            interview.save()
+        else:
+            db.session.commit()
+            if Config.is_mongo_configured():
+                try:
+                    m_doc = MongoInterview.find_by_id(interview.id) or MongoInterview(interview.to_dict())
+                    m_doc.report = MongoInterviewReport(report.to_dict() if hasattr(report, "to_dict") else report)
+                    m_doc.status = InterviewStatus.COMPLETED
+                    m_doc.completed_at = interview.completed_at
+                    m_doc.save()
+                except Exception as me:
+                    print(f"[API] Error saving report to Mongo: {me}")
+
+        session["active_report"] = report.to_dict() if hasattr(report, "to_dict") else report
         session.modified = True
 
         return jsonify({
@@ -373,17 +575,26 @@ def finalize_interview(interview_id: str):
     except TranscriptValidationError as tve:
         interview.status = InterviewStatus.INTERRUPTED
         interview.error_message = str(tve)
-        db.session.commit()
+        if isinstance(interview, MongoInterview):
+            interview.save()
+        else:
+            db.session.commit()
         return jsonify({"error": str(tve)}), 422
 
     except LLMConfigError as lce:
         interview.error_message = str(lce)
-        db.session.commit()
+        if isinstance(interview, MongoInterview):
+            interview.save()
+        else:
+            db.session.commit()
         return jsonify({"error": str(lce)}), 503
 
     except (LLMExecutionError, Exception) as e:
         interview.error_message = f"Evaluation failed: {str(e)}"
-        db.session.commit()
+        if isinstance(interview, MongoInterview):
+            interview.save()
+        else:
+            db.session.commit()
         return jsonify({"error": f"Evaluation processing error: {str(e)}"}), 500
 
 
@@ -392,7 +603,7 @@ def elevenlabs_webhook(interview_id: str):
     """
     Optional post-call webhook receiver from ElevenLabs Conversational AI.
     """
-    interview = db.session.get(Interview, interview_id)
+    interview = get_or_restore_interview(interview_id)
     if not interview:
         return jsonify({"error": "Interview not found."}), 404
 
@@ -414,7 +625,7 @@ def elevenlabs_webhook(interview_id: str):
 @api_bp.route("/interviews/<interview_id>/status", methods=["GET"])
 def get_interview_status(interview_id: str):
     """Check current interview status."""
-    interview = db.session.get(Interview, interview_id)
+    interview = get_or_restore_interview(interview_id)
     if not interview:
         return jsonify({"error": "Interview not found."}), 404
 
@@ -423,13 +634,17 @@ def get_interview_status(interview_id: str):
 
 @api_bp.route("/interviews/<interview_id>", methods=["DELETE"])
 def delete_interview(interview_id: str):
-    """Delete an interview and all associated records."""
-    interview = db.session.get(Interview, interview_id)
-    if not interview:
-        return jsonify({"error": "Interview not found."}), 404
+    """Delete an interview and all associated records from MongoDB and DB."""
+    if Config.is_mongo_configured():
+        try:
+            MongoInterview.delete(interview_id)
+        except Exception as me:
+            print(f"[API] Error deleting Mongo interview: {me}")
 
-    db.session.delete(interview)
-    db.session.commit()
+    interview = db.session.get(Interview, interview_id)
+    if interview:
+        db.session.delete(interview)
+        db.session.commit()
     return jsonify({"success": True, "message": "Interview deleted successfully."})
 
 
@@ -456,6 +671,8 @@ def restore_interview():
             duration_minutes=int(data.get("duration_minutes", 15)),
             difficulty=data.get("difficulty", "Intermediate"),
             language=data.get("language", "English"),
+            llm_provider=data.get("llm_provider", "gemini"),
+            voice_engine=data.get("voice_engine", "elevenlabs"),
             interview_plan=data.get("interview_plan"),
             transcript=data.get("transcript", []),
             status=data.get("status", InterviewStatus.PREPARED)
@@ -472,6 +689,8 @@ def restore_interview():
             "duration_minutes": restored.duration_minutes,
             "difficulty": restored.difficulty,
             "language": restored.language,
+            "llm_provider": restored.llm_provider,
+            "voice_engine": restored.voice_engine,
             "interview_plan": restored.interview_plan,
             "status": restored.status
         }

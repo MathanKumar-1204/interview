@@ -1,6 +1,6 @@
 import json
 import re
-from typing import Type, TypeVar, Optional, Any
+from typing import Type, TypeVar, Optional, Any, Dict
 from pydantic import BaseModel
 from openai import OpenAI
 from flask import current_app, has_app_context
@@ -45,25 +45,42 @@ class LLMService:
         cfg_model = current_app.config.get("LLM_MODEL") if has_app_context() else Config.LLM_MODEL
         cfg_url = current_app.config.get("LLM_BASE_URL") if has_app_context() else Config.LLM_BASE_URL
 
-        self.provider = (provider if provider is not None else cfg_provider or "gemini").lower()
-        self.api_key = api_key if api_key is not None else cfg_key
-        
-        # Auto-detect Gemini key format (AIza...)
-        if self.api_key and self.api_key.startswith("AIza") and self.provider != "mock":
-            self.provider = "gemini"
-
-        if self.provider == "gemini" and (not model or model.startswith("gpt")):
-            self.model = "gemini-2.0-flash"
+        is_test_env = (has_app_context() and current_app.config.get("TESTING")) or cfg_provider == "mock"
+        if is_test_env and cfg_provider == "mock" and (provider is None or provider == "mock" or not has_app_context() or current_app.config.get("TESTING")):
+            self.provider = "mock"
         else:
-            self.model = model if model is not None else cfg_model
-            
+            self.provider = (provider if provider is not None else cfg_provider or "gemini").lower().strip()
+
+        # Provider-specific credential and model resolution
+        if api_key is not None:
+            self.api_key = api_key
+        elif self.provider == "gemini":
+            self.api_key = (current_app.config.get("GEMINI_API_KEY") if has_app_context() else Config.GEMINI_API_KEY) or cfg_key
+        elif self.provider == "openai":
+            self.api_key = (current_app.config.get("OPENAI_API_KEY") if has_app_context() else Config.OPENAI_API_KEY) or (cfg_key if cfg_key and not cfg_key.startswith("AIza") else "")
+        elif self.provider == "claude":
+            self.api_key = (current_app.config.get("ANTHROPIC_API_KEY") if has_app_context() else Config.ANTHROPIC_API_KEY) or ""
+        else:
+            self.api_key = cfg_key
+
+        if model is not None:
+            self.model = model
+        elif self.provider == "gemini":
+            self.model = (current_app.config.get("GEMINI_MODEL") if has_app_context() else Config.GEMINI_MODEL) or "gemini-3.8-flash"
+        elif self.provider == "openai":
+            self.model = (current_app.config.get("OPENAI_MODEL") if has_app_context() else Config.OPENAI_MODEL) or "gpt-4o-mini"
+        elif self.provider == "claude":
+            self.model = (current_app.config.get("CLAUDE_MODEL") if has_app_context() else Config.CLAUDE_MODEL) or "claude-3-5-sonnet-20241022"
+        else:
+            self.model = cfg_model
+
         self.base_url = base_url if base_url is not None else cfg_url
 
     def _get_openai_client(self) -> OpenAI:
         if not self.api_key or self.api_key.startswith("your_"):
             raise LLMConfigError(
-                "OpenAI API key is not configured. Please set a valid LLM_API_KEY in your .env file "
-                "(or set LLM_PROVIDER=gemini with your GEMINI_API_KEY)."
+                "OpenAI API key is not configured. Please set OPENAI_API_KEY (or LLM_API_KEY) in your .env file "
+                "(or choose Google Gemini on the setup screen)."
             )
 
         kwargs = {"api_key": self.api_key}
@@ -74,8 +91,146 @@ class LLMService:
     # Backward compatibility alias
     _get_client = _get_openai_client
 
-    def _call_gemini(self, system_prompt: str, user_prompt: str) -> str:
+    def _call_openai(self, system_prompt: str, user_prompt: str, json_mode: bool = True) -> str:
+        """Call OpenAI API using direct requests (resilient against httpx2 decompression issues) with SDK fallback."""
+        if not self.api_key or self.api_key.startswith("your_"):
+            raise LLMConfigError(
+                "OpenAI API key is not configured. Please set OPENAI_API_KEY (or LLM_API_KEY) in your .env file "
+                "(or choose Google Gemini on the setup screen)."
+            )
+
+        model = self.model or "gpt-4o-mini"
+        if "gemini" in model.lower() or "claude" in model.lower():
+            model = "gpt-4o-mini"
+
+        base_url = (self.base_url or "https://api.openai.com/v1").rstrip("/")
+        endpoint = f"{base_url}/chat/completions"
+
+        messages = [
+            {
+                "role": "system",
+                "content": system_prompt + ("\n\nCRITICAL: Return ONLY a valid JSON object matching the requested schema." if json_mode else "")
+            },
+            {"role": "user", "content": user_prompt}
+        ]
+
+        payload: Dict[str, Any] = {
+            "model": model,
+            "messages": messages,
+            "temperature": 0.2,
+            "max_tokens": 4000,
+        }
+        if json_mode:
+            payload["response_format"] = {"type": "json_object"}
+
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json"
+        }
+
+        # 1. Primary: Direct HTTP request via requests (immune to httpx2 brotli process() bug)
+        try:
+            import requests
+            resp = requests.post(endpoint, headers=headers, json=payload, timeout=90)
+            if resp.ok:
+                data = resp.json()
+                choices = data.get("choices", [])
+                if choices and choices[0].get("message", {}).get("content"):
+                    return choices[0]["message"]["content"]
+                raise LLMExecutionError("OpenAI returned an empty response.")
+            else:
+                err_body = resp.text
+                if resp.status_code == 429 or "insufficient_quota" in err_body or "credit_balance_exhausted" in err_body:
+                    raise LLMExecutionError(
+                        "OpenAI credit balance is exhausted or rate limit reached (Error 429). "
+                        "To use Google Gemini instead, select Gemini on the setup screen or set LLM_PROVIDER=gemini."
+                    )
+                raise LLMExecutionError(f"OpenAI API returned HTTP {resp.status_code}: {err_body}")
+        except LLMExecutionError:
+            raise
+        except Exception as req_err:
+            # 2. Secondary fallback: Official SDK client (if requests had a local socket issue)
+            try:
+                client = self._get_openai_client()
+                kwargs: Dict[str, Any] = {
+                    "model": model,
+                    "messages": messages,
+                    "temperature": 0.2,
+                    "max_tokens": 4000,
+                }
+                if json_mode:
+                    kwargs["response_format"] = {"type": "json_object"}
+                sdk_resp = client.chat.completions.create(**kwargs)
+                raw = sdk_resp.choices[0].message.content or ""
+                if not raw:
+                    raise LLMExecutionError("OpenAI SDK returned an empty response.")
+                return raw
+            except Exception as sdk_err:
+                err_str = str(sdk_err)
+                if "credit_balance_exhausted" in err_str or "insufficient_quota" in err_str or "429" in err_str:
+                    raise LLMExecutionError(
+                        "OpenAI credit balance is exhausted (Error 429). "
+                        "To use Google Gemini instead, select Gemini on the setup screen."
+                    )
+                raise LLMExecutionError(f"OpenAI request failed: {err_str} (Direct request error: {req_err})")
+
+    def _call_claude(self, system_prompt: str, user_prompt: str) -> str:
+        """Call Anthropic Claude API for structured analysis."""
+        if not self.api_key or self.api_key.startswith("your_"):
+            raise LLMConfigError(
+                "Anthropic Claude API key is not configured. Please set ANTHROPIC_API_KEY in your .env file "
+                "(or choose Google Gemini on the setup screen)."
+            )
+
+        # Try using anthropic official SDK if installed
+        try:
+            import anthropic
+            client = anthropic.Anthropic(api_key=self.api_key)
+            response = client.messages.create(
+                model=self.model or "claude-3-5-sonnet-20241022",
+                max_tokens=4000,
+                temperature=0.2,
+                system=system_prompt + "\n\nCRITICAL: Return ONLY a valid JSON object strictly matching the schema. No markdown fences or commentary.",
+                messages=[{"role": "user", "content": user_prompt}]
+            )
+            if response.content and len(response.content) > 0:
+                return response.content[0].text
+            raise LLMExecutionError("Claude returned an empty response.")
+        except ImportError:
+            # Fallback to direct HTTP request using requests
+            import requests
+            headers = {
+                "x-api-key": self.api_key,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json"
+            }
+            payload = {
+                "model": self.model or "claude-3-5-sonnet-20241022",
+                "max_tokens": 4000,
+                "temperature": 0.2,
+                "system": system_prompt + "\n\nCRITICAL: Return ONLY a valid JSON object strictly matching the schema. No markdown code blocks.",
+                "messages": [{"role": "user", "content": user_prompt}]
+            }
+            try:
+                res = requests.post("https://api.anthropic.com/v1/messages", headers=headers, json=payload, timeout=60)
+                if not res.ok:
+                    raise LLMExecutionError(f"Claude API request failed ({res.status_code}): {res.text}")
+                data = res.json()
+                parts = data.get("content", [])
+                if parts and len(parts) > 0:
+                    return parts[0].get("text", "")
+                raise LLMExecutionError("Claude returned an empty response.")
+            except Exception as e:
+                raise LLMExecutionError(f"Claude request error: {str(e)}")
+
+    def _call_gemini(self, system_prompt: str, user_prompt: str, json_mode: bool = True) -> str:
         """Call Google Gemini using the google-genai SDK or legacy fallback."""
+        if self.provider == "mock":
+            return (
+                "That is a great perspective. Could you share a specific project or metric where that "
+                "content strategy delivered measurable impact?"
+            )
+
         if not self.api_key or self.api_key.startswith("your_"):
             raise LLMConfigError(
                 "Gemini API key is not configured. Please set GEMINI_API_KEY (or LLM_API_KEY) in your .env file "
@@ -99,12 +254,26 @@ class LLMService:
         from google.genai import types
 
         client = genai.Client(api_key=self.api_key)
-        combined_prompt = (
-            f"{system_prompt}\n\n"
-            f"--- Target Input Data ---\n"
-            f"{user_prompt}\n\n"
-            f"CRITICAL: Return ONLY a valid JSON object strictly matching the schema."
-        )
+        if json_mode:
+            combined_prompt = (
+                f"{system_prompt}\n\n"
+                f"--- Target Input Data ---\n"
+                f"{user_prompt}\n\n"
+                f"CRITICAL: Return ONLY a valid JSON object strictly matching the schema."
+            )
+            config_params = types.GenerateContentConfig(
+                response_mime_type="application/json",
+                temperature=0.2,
+            )
+        else:
+            combined_prompt = (
+                f"{system_prompt}\n\n"
+                f"{user_prompt}\n\n"
+                f"INSTRUCTION: Speak naturally to the candidate in spoken conversational English. Do NOT output JSON. Do NOT wrap in curly braces or quotes."
+            )
+            config_params = types.GenerateContentConfig(
+                temperature=0.7,
+            )
 
         last_error = None
         for model_to_try in candidate_models:
@@ -112,10 +281,7 @@ class LLMService:
                 response = client.models.generate_content(
                     model=model_to_try,
                     contents=combined_prompt,
-                    config=types.GenerateContentConfig(
-                        response_mime_type="application/json",
-                        temperature=0.2,
-                    )
+                    config=config_params
                 )
                 if not response or not response.text:
                     raise LLMExecutionError("Gemini returned an empty response.")
@@ -156,31 +322,11 @@ class LLMService:
         raw_content = ""
 
         if self.provider == "gemini":
-            raw_content = self._call_gemini(system_prompt, user_prompt)
+            raw_content = self._call_gemini(system_prompt, user_prompt, json_mode=True)
+        elif self.provider == "claude":
+            raw_content = self._call_claude(system_prompt, user_prompt)
         else:
-            client = self._get_openai_client()
-            try:
-                response = client.chat.completions.create(
-                    model=self.model,
-                    messages=[
-                        {"role": "system", "content": system_prompt + "\n\nCRITICAL: Return ONLY a valid JSON object matching the requested schema."},
-                        {"role": "user", "content": user_prompt}
-                    ],
-                    response_format={"type": "json_object"},
-                    temperature=0.2,
-                    max_tokens=4000,
-                )
-                raw_content = response.choices[0].message.content or ""
-                if not raw_content:
-                    raise LLMExecutionError("LLM returned an empty response.")
-            except Exception as e:
-                err_str = str(e)
-                if "credit_balance_exhausted" in err_str or "insufficient_quota" in err_str or "429" in err_str:
-                    raise LLMExecutionError(
-                        "OpenAI credit balance is exhausted (Error 429). "
-                        "To use Google Gemini instead, set LLM_PROVIDER=gemini and GEMINI_API_KEY=your_key in .env."
-                    )
-                raise LLMExecutionError(f"OpenAI request failed: {err_str}")
+            raw_content = self._call_openai(system_prompt, user_prompt, json_mode=True)
 
         try:
             cleaned = clean_json_text(raw_content)

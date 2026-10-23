@@ -147,7 +147,27 @@ class EvaluationService:
             assessment_limitations=report_data.assessment_limitations
         )
 
-        db.session.add(report)
-        interview.status = InterviewStatus.COMPLETED
-        db.session.commit()
+        try:
+            db.session.add(report)
+            interview.status = InterviewStatus.COMPLETED
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+
+        # Synchronize report into MongoDB for persistent storage
+        try:
+            from app.services.mongo_service import MongoInterview, MongoInterviewReport
+            from app.config import Config
+            if isinstance(interview, MongoInterview):
+                interview.report = MongoInterviewReport(report.to_dict())
+                interview.status = InterviewStatus.COMPLETED
+                interview.save()
+            elif Config.is_mongo_configured():
+                m_doc = MongoInterview.find_by_id(interview.id) or MongoInterview(interview.to_dict())
+                m_doc.report = MongoInterviewReport(report.to_dict())
+                m_doc.status = InterviewStatus.COMPLETED
+                m_doc.save()
+        except Exception as me:
+            print(f"[EvaluationService] Mongo report sync error: {me}")
+
         return report

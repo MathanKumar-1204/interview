@@ -51,6 +51,10 @@ class Config:
     DATABASE_URL = RESOLVED_DB_URL
     SQLALCHEMY_DATABASE_URI = RESOLVED_DB_URL
     SQLALCHEMY_TRACK_MODIFICATIONS = False
+
+    # MongoDB Database
+    MONGO_URI = os.getenv("MONGO_URI", "").strip()
+    MONGO_DB_NAME = os.getenv("MONGO_DB_NAME", "").strip() or None
     
     # Upload settings
     MAX_CONTENT_LENGTH = int(os.getenv("MAX_CONTENT_LENGTH", 10 * 1024 * 1024))  # 10 MB
@@ -67,15 +71,28 @@ class Config:
     # LLM Settings
     LLM_PROVIDER = os.getenv("LLM_PROVIDER", "gemini").lower().strip()
     GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip() or os.getenv("GOOGLE_API_KEY", "").strip()
-    LLM_API_KEY = os.getenv("LLM_API_KEY", "").strip() or GEMINI_API_KEY
+    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip() or os.getenv("LLM_API_KEY", "").strip()
+    ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "").strip() or os.getenv("CLAUDE_API_KEY", "").strip()
+    LLM_API_KEY = os.getenv("LLM_API_KEY", "").strip() or GEMINI_API_KEY or OPENAI_API_KEY or ANTHROPIC_API_KEY
+    
+    # Provider-specific models
+    GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.8-flash").strip()
+    OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini").strip()
+    CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-3-5-sonnet-20241022").strip()
+    GEMINI_LIVE_MODEL = os.getenv("GEMINI_LIVE_MODEL", "gemini-2.0-flash-exp").strip()
     
     # Auto-detect Gemini if key starts with AIza
     if LLM_API_KEY.startswith("AIza") and LLM_PROVIDER not in ("gemini", "mock"):
         LLM_PROVIDER = "gemini"
 
     # Default model depending on provider
-    default_model = "gemini-3.8-flash" if LLM_PROVIDER == "gemini" else "gpt-4o-mini"
-    LLM_MODEL = os.getenv("GEMINI_MODEL", "").strip() or os.getenv("LLM_MODEL", default_model).strip()
+    default_model = (
+        GEMINI_MODEL if LLM_PROVIDER == "gemini"
+        else OPENAI_MODEL if LLM_PROVIDER == "openai"
+        else CLAUDE_MODEL if LLM_PROVIDER == "claude"
+        else "mock"
+    )
+    LLM_MODEL = os.getenv("LLM_MODEL", default_model).strip()
     LLM_BASE_URL = os.getenv("LLM_BASE_URL", "").strip() or None
 
     @classmethod
@@ -85,11 +102,31 @@ class Config:
         return bool(cls.ELEVENLABS_API_KEY and cls.ELEVENLABS_AGENT_ID)
 
     @classmethod
-    def is_llm_configured(cls) -> bool:
-        if cls.LLM_PROVIDER == "mock":
+    def is_gemini_live_configured(cls) -> bool:
+        return bool(cls.GEMINI_API_KEY and not cls.GEMINI_API_KEY.startswith("your_"))
+
+    @classmethod
+    def is_mongo_configured(cls) -> bool:
+        return bool(cls.MONGO_URI and not cls.MONGO_URI.startswith("your_"))
+
+    @classmethod
+    def is_provider_configured(cls, provider: str) -> bool:
+        prov = (provider or "").lower().strip()
+        if prov == "mock":
             return True
-        key = cls.LLM_API_KEY or cls.GEMINI_API_KEY
-        return bool(key and not key.startswith("your_"))
+        elif prov == "gemini":
+            return bool(cls.GEMINI_API_KEY and not cls.GEMINI_API_KEY.startswith("your_"))
+        elif prov == "openai":
+            key = cls.OPENAI_API_KEY or cls.LLM_API_KEY
+            return bool(key and not key.startswith("your_") and not key.startswith("AIza"))
+        elif prov == "claude":
+            key = cls.ANTHROPIC_API_KEY
+            return bool(key and not key.startswith("your_"))
+        return False
+
+    @classmethod
+    def is_llm_configured(cls) -> bool:
+        return cls.is_provider_configured(cls.LLM_PROVIDER)
 
 
 class DevelopmentConfig(Config):

@@ -30,9 +30,12 @@ class Interview(db.Model):
     resume_filename = db.Column(db.String(255), nullable=True)
     
     # Interview Configuration
+    user_id = db.Column(db.String(100), nullable=True)
     duration_minutes = db.Column(db.Integer, nullable=False, default=15)
     difficulty = db.Column(db.String(50), nullable=False, default="Intermediate")
     language = db.Column(db.String(50), nullable=False, default="English")
+    llm_provider = db.Column(db.String(50), nullable=False, default="gemini")  # 'gemini', 'openai', 'claude', 'mock'
+    voice_engine = db.Column(db.String(50), nullable=False, default="elevenlabs")  # 'elevenlabs', 'gemini_live'
     
     # Status Lifecycle
     status = db.Column(db.String(30), nullable=False, default=InterviewStatus.DRAFT)
@@ -62,12 +65,15 @@ class Interview(db.Model):
     def to_dict(self):
         return {
             "id": self.id,
+            "user_id": self.user_id,
             "candidate_name": self.candidate_name,
             "candidate_email": self.candidate_email,
             "job_title": self.job_title,
             "duration_minutes": self.duration_minutes,
             "difficulty": self.difficulty,
             "language": self.language,
+            "llm_provider": self.llm_provider,
+            "voice_engine": self.voice_engine,
             "status": self.status,
             "jd_analysis": self.jd_analysis,
             "resume_analysis": self.resume_analysis,

@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+
+{% block title %}Sign Up - AI Interview Studio{% endblock %}
+
+{% block content %}
+<div style="max-width: 480px; margin: 2.5rem auto;">
+  <div style="text-align: center; margin-bottom: 2rem;">
+    <div style="font-size: 2.75rem; margin-bottom: 0.5rem;">🎙️</div>
+    <h1 style="font-size: 1.85rem; font-weight: 700; color: var(--text-main); margin-bottom: 0.35rem;">
+      Create Your Account
+    </h1>
+    <p style="color: var(--text-secondary); font-size: 0.925rem;">
+      Sign up to create voice interviews, conduct spoken assessments, and access saved transcripts & evaluation reports.
+    </p>
+  </div>
+
+  <div class="card" style="box-shadow: var(--shadow-lg); padding: 2rem;">
+    <form method="POST" action="{{ url_for('auth.signup') }}">
+      <div class="form-group">
+        <label class="form-label" for="name">Full Name <span class="required">*</span></label>
+        <input 
+          type="text" 
+          id="name" 
+          name="name" 
+          class="form-input" 
+          placeholder="e.g. Maya Chen" 
+          value="{{ name or '' }}" 
+          required 
+          autofocus
+        >
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="email">Work Email <span class="required">*</span></label>
+        <input 
+          type="email" 
+          id="email" 
+          name="email" 
+          class="form-input" 
+          placeholder="e.g. maya@company.com" 
+          value="{{ email or '' }}" 
+          required
+        >
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="password">Password <span class="required">*</span></label>
+        <input 
+          type="password" 
+          id="password" 
+          name="password" 
+          class="form-input" 
+          placeholder="Minimum 6 characters" 
+          minlength="6" 
+          required
+        >
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="confirm_password">Confirm Password <span class="required">*</span></label>
+        <input 
+          type="password" 
+          id="confirm_password" 
+          name="confirm_password" 
+          class="form-input" 
+          placeholder="Re-type your password" 
+          minlength="6" 
+          required
+        >
+      </div>
+
+      <button type="submit" class="btn btn-primary btn-lg" style="width: 100%; margin-top: 0.5rem; justify-content: center;">
+        Sign Up & Access Studio →
+      </button>
+    </form>
+
+    <div style="margin-top: 1.5rem; padding-top: 1.25rem; border-top: 1px solid var(--border-color); text-align: center; font-size: 0.875rem; color: var(--text-secondary);">
+      Already have an account? 
+      <a href="{{ url_for('auth.login') }}" style="color: var(--primary); font-weight: 600; text-decoration: none;">
+        Log In
+      </a>
+    </div>
+  </div>
+</div>
+{% endblock %}

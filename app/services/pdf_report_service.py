@@ -109,7 +109,15 @@ class PDFReportService:
         story.append(HRFlowable(width="100%", thickness=1.5, color=primary_color, spaceAfter=12))
 
         # Metadata Block
-        date_str = report.created_at.strftime("%B %d, %Y") if report.created_at else datetime.now().strftime("%B %d, %Y")
+        if isinstance(report.created_at, datetime):
+            date_str = report.created_at.strftime("%B %d, %Y")
+        elif isinstance(report.created_at, str):
+            try:
+                date_str = datetime.fromisoformat(report.created_at.replace("Z", "+00:00")).strftime("%B %d, %Y")
+            except Exception:
+                date_str = report.created_at
+        else:
+            date_str = datetime.now().strftime("%B %d, %Y")
         meta_data = [
             [
                 Paragraph(f"<b>Candidate:</b> {interview.candidate_name}", body_style),

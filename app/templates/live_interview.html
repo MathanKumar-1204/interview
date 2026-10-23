@@ -8,14 +8,18 @@
   <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 1rem;">
     <div>
       <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.25rem;">
-        <span class="badge badge-indigo">Live Assessment</span>
+        {% if voice_engine == 'gemini_live' %}
+          <span class="badge badge-emerald">♊ Gemini Flash Live</span>
+        {% else %}
+          <span class="badge badge-indigo">🎙️ ElevenLabs AI</span>
+        {% endif %}
         <span id="connectionBadge" class="badge badge-gray">Not Connected</span>
       </div>
       <h1 style="font-size: 1.6rem; font-weight: 700; color: var(--text-main);">
         {{ interview.candidate_name }}
       </h1>
       <p style="color: var(--text-secondary); font-size: 0.9rem;">
-        Role: <b>{{ interview.job_title }}</b> • Difficulty: {{ interview.difficulty }}
+        Role: <b>{{ interview.job_title }}</b> • Difficulty: {{ interview.difficulty }} • Model: <b>{{ interview.llm_provider|upper }}</b>
       </p>
     </div>
 
@@ -56,10 +60,14 @@
     </p>
 
     <!-- Voice Connection Status Indicator -->
-    <div id="voiceStatusContainer" style="margin-bottom: 1.5rem; min-height: 48px; display: flex; justify-content: center; align-items: center;">
-      {% if not elevenlabs_ready %}
+    <div id="voiceStatusContainer" style="margin-bottom: 1.5rem; min-height: 48px; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 0.75rem;">
+      {% if voice_engine == 'elevenlabs' and not elevenlabs_ready %}
         <div class="config-banner" style="display: inline-flex; margin: 0 auto;">
-          <span>⚠️ <b>Configuration Required:</b> Set <code>ELEVENLABS_API_KEY</code> and <code>ELEVENLABS_AGENT_ID</code> in <code>.env</code> to enable live voice calling.</span>
+          <span>⚠️ <b>ElevenLabs Configuration Required:</b> Set <code>ELEVENLABS_API_KEY</code> and <code>ELEVENLABS_AGENT_ID</code> in <code>.env</code> or switch to Gemini Flash Live voice.</span>
+        </div>
+      {% elif voice_engine == 'gemini_live' and not gemini_live_ready %}
+        <div class="config-banner" style="display: inline-flex; margin: 0 auto;">
+          <span>⚠️ <b>Gemini Configuration Required:</b> Set <code>GEMINI_API_KEY</code> in <code>.env</code> to enable Gemini Flash Live voice assessment.</span>
         </div>
       {% else %}
         <div id="audioStatusPill" style="font-size: 0.875rem; font-weight: 500; color: var(--text-secondary); display: inline-flex; align-items: center; gap: 0.6rem; padding: 0.4rem 1rem; background: var(--bg-muted); border-radius: var(--radius-full); border: 1px solid var(--border-color);">
@@ -70,10 +78,59 @@
       {% endif %}
     </div>
 
+    <!-- Real-Time Voice Activity Monitor for Gemini Live -->
+    <div id="liveVoiceMonitor" style="display: none; width: 100%; max-width: 600px; margin: 1.25rem auto; padding: 1.25rem 1.5rem; background: #ffffff; border: 2px solid #e0e7ff; border-radius: var(--radius-lg); box-shadow: 0 4px 16px rgba(99, 102, 241, 0.08); text-align: center;">
+      <!-- State Indicator Pill -->
+      <div id="liveMonitorState" style="display: inline-flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; font-weight: 700; color: #4f46e5; margin-bottom: 0.5rem; padding: 0.35rem 0.85rem; background: #eef2ff; border-radius: var(--radius-full);">
+        <span id="liveMonitorDot" style="width: 8px; height: 8px; border-radius: 50%; background: #4f46e5; display: inline-block;"></span>
+        <span id="liveMonitorStateText">🎙️ Listening to you... Speak into your microphone</span>
+      </div>
+
+      <!-- Real-time transcript of what candidate is speaking -->
+      <div id="liveTranscriptDisplay" style="font-size: 1.05rem; line-height: 1.5; color: var(--text-main); min-height: 40px; margin: 0.5rem 0; font-weight: 500; word-break: break-word;">
+        <span style="color: var(--text-muted); font-style: italic;">(Alex is ready for your answer...)</span>
+      </div>
+
+      <!-- Auto-send pause countdown -->
+      <div id="livePauseIndicator" style="font-size: 0.825rem; font-weight: 600; color: var(--success); min-height: 20px; margin-bottom: 0.5rem; display: none;">
+        ⏳ Pause detected — submitting answer in 1 second...
+      </div>
+
+      <!-- Action: Finish Speaking Now Button -->
+      <div style="margin-top: 0.75rem;">
+        <button type="button" id="doneSpeakingBtn" class="btn btn-primary" style="padding: 0.55rem 1.5rem; font-size: 0.95rem; border-radius: var(--radius-full); box-shadow: 0 4px 12px rgba(79, 70, 229, 0.35); display: none;">
+          ✓ Done Speaking (Send Answer to Alex) ↵
+        </button>
+      </div>
+    </div>
+
+    <!-- Browser Speech Recognition Notice (specifically for Brave) -->
+    <div id="braveSpeechNotice" class="config-banner" style="display: none; max-width: 620px; margin: 1rem auto; text-align: left; background: #fffbeb; border-color: #fde68a; color: #92400e;">
+      <span style="font-size: 1.25rem;">🦁</span>
+      <div>
+        <b>Speech Recognition Blocked in Brave Browser:</b><br>
+        Brave shields disable Google Web Speech services by default. To speak naturally:
+        <ul style="margin: 0.35rem 0 0 1.2rem; font-size: 0.825rem;">
+          <li>Open <code>brave://settings/privacy</code> and turn <b>ON</b> <i>"Use Google services for speech recognition"</i>, OR</li>
+          <li>Use Chrome or Edge for automatic speech recognition, OR</li>
+          <li>Use the quick answer bar below.</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Manual fallback input if speech recognition is unavailable or blocked -->
+    <div id="voiceFallbackInput" style="display: none; width: 100%; max-width: 600px; margin: 1rem auto;">
+      <div style="display: flex; gap: 0.5rem;">
+        <input type="text" id="voiceFallbackTextInput" class="form-input" placeholder="Type or paste your spoken answer here if microphone is blocked in Brave..." style="font-size: 0.9rem;">
+        <button type="button" id="voiceFallbackSendBtn" class="btn btn-secondary" style="white-space: nowrap;">Send Answer ↵</button>
+      </div>
+    </div>
+
     <!-- Live Controls -->
+    {% set is_configured = (elevenlabs_ready if voice_engine == 'elevenlabs' else gemini_live_ready) %}
     <div style="display: flex; justify-content: center; gap: 1rem; align-items: center; flex-wrap: wrap;">
-      <button id="startInterviewBtn" class="btn btn-primary btn-lg" {% if not elevenlabs_ready %}disabled{% endif %}>
-        ▶️ Start Interview Call
+      <button id="startInterviewBtn" class="btn btn-primary btn-lg" {% if not is_configured %}disabled{% endif %}>
+        ▶️ Start Interview Call ({% if voice_engine == 'gemini_live' %}Gemini Flash Live{% else %}ElevenLabs AI{% endif %})
       </button>
 
       <button id="endInterviewBtn" class="btn btn-danger btn-lg" style="display: none;">
@@ -141,7 +198,10 @@
   const targetDurationMinutes = parseInt("{{ interview.duration_minutes }}", 10);
   const authMode = "{{ auth_mode }}";
   const configuredAgentId = "{{ agent_id }}";
+  const voiceEngine = "{{ voice_engine }}";
   const isElevenLabsConfigured = {{ 'true' if elevenlabs_ready else 'false' }};
+  const isGeminiLiveConfigured = {{ 'true' if gemini_live_ready else 'false' }};
+  const isEngineConfigured = {{ 'true' if (elevenlabs_ready if voice_engine == 'elevenlabs' else gemini_live_ready) else 'false' }};
 </script>
 <script type="module" src="{{ url_for('static', filename='js/live_interview.js') }}"></script>
 {% endblock %}

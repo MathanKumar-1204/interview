@@ -134,3 +134,101 @@ def test_interview_plan_schema_unwraps_nested_metadata():
     assert plan.required_competencies[0].weight == 50
 
 
+def test_create_interview_with_model_selection(client, sample_pdf_bytes):
+    for model in ("gemini", "openai", "claude"):
+        data = {
+            "candidate_name": f"Candidate {model}",
+            "llm_provider": model,
+            "resume_file": (io.BytesIO(sample_pdf_bytes), "resume.pdf")
+        }
+        res = client.post("/api/interviews", data=data, content_type="multipart/form-data")
+        assert res.status_code == 201
+        body = res.get_json()
+        assert body["interview"]["llm_provider"] == model
+
+
+def test_update_voice_engine_endpoints(client, prepared_interview):
+    # Switch to gemini_live
+    res1 = client.post(
+        f"/api/interviews/{prepared_interview.id}/voice-engine",
+        json={"voice_engine": "gemini_live"}
+    )
+    assert res1.status_code == 200
+    assert res1.get_json()["voice_engine"] == "gemini_live"
+
+    # Switch back to elevenlabs
+    res2 = client.post(
+        f"/api/interviews/{prepared_interview.id}/voice-engine",
+        json={"voice_engine": "elevenlabs"}
+    )
+    assert res2.status_code == 200
+    assert res2.get_json()["voice_engine"] == "elevenlabs"
+
+    # Reject invalid engine
+    res3 = client.post(
+        f"/api/interviews/{prepared_interview.id}/voice-engine",
+        json={"voice_engine": "invalid_engine"}
+    )
+    assert res3.status_code == 400
+
+
+def test_gemini_live_flow_and_turn(client, prepared_interview):
+    # Set engine to gemini_live
+    client.post(
+        f"/api/interviews/{prepared_interview.id}/voice-engine",
+        json={"voice_engine": "gemini_live"}
+    )
+
+    with patch("app.config.Config.is_gemini_live_configured", return_value=True):
+        # Credentials endpoint should return greeting
+        res = client.get(f"/api/interviews/{prepared_interview.id}/conversation-credentials")
+        assert res.status_code == 200
+        data = res.get_json()
+        assert data["success"] is True
+        assert data["voice_engine"] == "gemini_live"
+        assert "greeting" in data
+        assert "Alex" in data["greeting"]["message"]
+
+        # Turn processing endpoint
+        turn_res = client.post(
+            f"/api/interviews/{prepared_interview.id}/gemini-live/turn",
+            json={
+                "candidate_message": "I specialize in writing high-converting SEO articles and newsletters.",
+                "history": []
+            }
+        )
+        assert turn_res.status_code == 200
+        turn_data = turn_res.get_json()
+        assert turn_data["success"] is True
+        assert "message" in turn_data["turn"]
+        assert len(turn_data["turn"]["message"]) > 5
+
+
+def test_templates_render_model_and_engine_selectors(client, prepared_interview):
+    # Dashboard page contains the primary model & engine selector dropdowns
+    dash_res = client.get("/")
+    assert dash_res.status_code == 200
+    dash_html = dash_res.get_data(as_text=True)
+    assert 'id="dashboard_llm_provider"' in dash_html
+    assert 'id="dashboard_voice_engine"' in dash_html
+    assert 'value="gemini"' in dash_html
+    assert 'value="openai"' in dash_html
+    assert 'value="claude"' in dash_html
+    assert 'value="gemini_live"' in dash_html
+    assert 'value="elevenlabs"' in dash_html
+
+    # Setup page inherits and binds the studio engines
+    setup_res = client.get("/interviews/new")
+    assert setup_res.status_code == 200
+    setup_html = setup_res.get_data(as_text=True)
+    assert 'name="llm_provider"' in setup_html
+    assert 'name="voice_engine"' in setup_html
+
+    # Preparation page displays the active voice engine configuration
+    prep_res = client.get(f"/interviews/{prepared_interview.id}")
+    assert prep_res.status_code == 200
+    prep_html = prep_res.get_data(as_text=True)
+    assert 'Live Voice Studio' in prep_html
+
+
+

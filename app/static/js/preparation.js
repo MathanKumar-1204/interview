@@ -5,6 +5,67 @@ document.addEventListener("DOMContentLoaded", () => {
   const updateTitleBtn = document.getElementById("updateTitleBtn");
   const editJobTitle = document.getElementById("editJobTitle");
   const retryPlanBtn = document.getElementById("retryPlanBtn");
+  const voiceEngineRadios = document.querySelectorAll('input[name="voice_engine_select"]');
+  const savingBadge = document.getElementById("voiceEngineSavingBadge");
+
+  // Handle Voice Engine switching
+  voiceEngineRadios.forEach(radio => {
+    radio.addEventListener("change", async () => {
+      const selectedEngine = radio.value;
+
+      // Update UI card borders
+      document.querySelectorAll(".voice-engine-card").forEach(card => {
+        card.style.borderColor = "var(--border-color)";
+      });
+      const parentLabel = radio.closest(".voice-engine-card");
+      if (parentLabel) {
+        parentLabel.style.borderColor = "var(--primary)";
+      }
+
+      if (savingBadge) {
+        savingBadge.textContent = "Saving...";
+        savingBadge.style.display = "inline-block";
+      }
+
+      try {
+        const response = await fetch(`/api/interviews/${interviewId}/voice-engine`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Accept": "application/json"
+          },
+          body: JSON.stringify({ voice_engine: selectedEngine })
+        });
+
+        const data = await response.json();
+        if (response.ok && data.success) {
+          if (savingBadge) {
+            savingBadge.textContent = "Saved ✓";
+            setTimeout(() => {
+              savingBadge.style.display = "none";
+            }, 1800);
+          }
+
+          // Update cached session
+          const cached = sessionStorage.getItem("interview_" + interviewId);
+          if (cached) {
+            try {
+              const obj = JSON.parse(cached);
+              obj.voice_engine = selectedEngine;
+              sessionStorage.setItem("interview_" + interviewId, JSON.stringify(obj));
+              sessionStorage.setItem("current_interview", JSON.stringify(obj));
+            } catch (_) {}
+          }
+        } else {
+          alert(data.error || "Failed to update voice engine.");
+          if (savingBadge) savingBadge.style.display = "none";
+        }
+      } catch (err) {
+        console.error("Error updating voice engine:", err);
+        if (savingBadge) savingBadge.style.display = "none";
+      }
+    });
+  });
 
   if (updateTitleBtn && editJobTitle) {
     updateTitleBtn.addEventListener("click", async () => {

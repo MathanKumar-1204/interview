@@ -13,7 +13,7 @@
         Interview Preparation & Plan
       </h1>
       <p style="color: var(--text-secondary);">
-        Candidate: <b>{{ interview.candidate_name }}</b> • {{ interview.duration_minutes }} min • {{ interview.difficulty }} Level
+        Candidate: <b>{{ interview.candidate_name }}</b> • {{ interview.duration_minutes }} min • {{ interview.difficulty }} Level • Model: <span class="badge badge-indigo" style="font-size: 0.75rem;">{{ interview.llm_provider|upper }}</span>
       </p>
     </div>
 
@@ -182,18 +182,42 @@
     {% endif %}
 
     <div style="margin-top: 1.5rem; padding: 1rem; background: var(--bg-muted); border-radius: var(--radius-md); font-size: 0.85rem; color: var(--text-secondary);">
-      <b>How the live interview works:</b> The candidate connects to an ElevenLabs Conversational AI voice agent. The AI speaks one question at a time, listens actively to candidate responses, asks adaptive follow-ups if answers are brief, and progresses naturally through the sections. At the end, an evidence-based report is automatically computed.
+      <b>How the live interview works:</b> The candidate connects to an AI voice agent. The AI speaks one question at a time, listens actively to candidate responses, asks adaptive follow-ups if answers are brief, and progresses naturally through the sections. At the end, an evidence-based report is automatically computed.
     </div>
   </div>
 
-  <!-- Bottom CTA -->
-  <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 2rem;">
-    <a href="{{ url_for('dashboard.index') }}" class="btn btn-secondary">
-      Return to Dashboard
-    </a>
-    <a href="{{ url_for('interviews.live_interview', interview_id=interview.id) }}" class="btn btn-primary btn-lg">
-      Enter Live Voice Studio →
-    </a>
+  <!-- Live Voice Interview Engine Selector -->
+  <!-- Configured Voice Engine Card (Set from Dashboard) -->
+  <div class="card" style="margin-top: 1.5rem; background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%); border: 1.5px solid var(--border-color);">
+    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
+      <div>
+        <div style="font-size: 0.725rem; font-weight: 700; text-transform: uppercase; color: var(--text-muted); margin-bottom: 0.25rem;">
+          🎙️ Configured Voice Engine
+        </div>
+        <div style="display: flex; gap: 0.5rem; align-items: center;">
+          <span style="font-weight: 700; font-size: 1.05rem; color: var(--text-main);">
+            {% if interview.voice_engine == 'gemini_live' %}
+              ♊ Gemini Flash Live Voice Engine
+            {% else %}
+              🎙️ ElevenLabs Conversational AI
+            {% endif %}
+          </span>
+          <span class="badge badge-emerald">Ready</span>
+        </div>
+        <p style="font-size: 0.85rem; color: var(--text-secondary); margin: 0.25rem 0 0;">
+          Configured from Dashboard. Alex is prepared to conduct the spoken assessment with targeted follow-up probing.
+        </p>
+      </div>
+
+      <div style="display: flex; gap: 0.75rem; align-items: center;">
+        <a href="{{ url_for('dashboard.index') }}" class="btn btn-secondary">
+          Dashboard
+        </a>
+        <a href="{{ url_for('interviews.live_interview', interview_id=interview.id) }}" class="btn btn-primary btn-lg" style="box-shadow: 0 4px 14px rgba(79, 70, 229, 0.35);">
+          Enter Live Voice Studio →
+        </a>
+      </div>
+    </div>
   </div>
 </div>
 {% endblock %}

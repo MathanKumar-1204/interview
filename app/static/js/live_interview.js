@@ -1,7 +1,8 @@
 /**
  * Live Spoken Interview Session Controller
- * Uses ElevenLabs Conversational AI Web SDK (@elevenlabs/client) to establish a real-time,
- * two-way voice stream with microphone capture, agent speech playback, and live transcript synchronization.
+ * Supports dual live voice engines:
+ * 1. ElevenLabs Conversational AI Web SDK (@elevenlabs/client)
+ * 2. Gemini Flash Live Voice Engine (Multimodal turn-taking with browser speech synthesis & recognition)
  */
 
 import { Conversation } from "https://cdn.jsdelivr.net/npm/@elevenlabs/client/+esm";
@@ -13,6 +14,13 @@ let isCallActive = false;
 let isFinalizing = false;
 let transcriptTurns = [];
 let conversationId = null;
+
+// Gemini Flash Live voice states
+let isAlexSpeaking = false;
+let isWaitingForAiReply = false;
+let recognitionInstance = null;
+let isRecognizing = false;
+const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
 document.addEventListener("DOMContentLoaded", () => {
   const startBtn = document.getElementById("startInterviewBtn");
@@ -34,6 +42,55 @@ document.addEventListener("DOMContentLoaded", () => {
   const finalizingModal = document.getElementById("finalizingModal");
   const audioStatusDot = document.getElementById("audioStatusDot");
   const audioStatusText = document.getElementById("audioStatusText");
+
+  // Gemini Live speech monitor & feedback elements
+  const liveVoiceMonitor = document.getElementById("liveVoiceMonitor");
+  const liveMonitorStateText = document.getElementById("liveMonitorStateText");
+  const liveMonitorDot = document.getElementById("liveMonitorDot");
+  const liveTranscriptDisplay = document.getElementById("liveTranscriptDisplay");
+  const livePauseIndicator = document.getElementById("livePauseIndicator");
+  const doneSpeakingBtn = document.getElementById("doneSpeakingBtn");
+  const braveSpeechNotice = document.getElementById("braveSpeechNotice");
+  const voiceFallbackInput = document.getElementById("voiceFallbackInput");
+  const voiceFallbackTextInput = document.getElementById("voiceFallbackTextInput");
+  const voiceFallbackSendBtn = document.getElementById("voiceFallbackSendBtn");
+
+  let currentSpokenCandidateText = "";
+
+  // Pre-load synthesis voices
+  if (typeof window !== "undefined" && window.speechSynthesis) {
+    window.speechSynthesis.onvoiceschanged = () => {
+      window.speechSynthesis.getVoices();
+    };
+  }
+
+  // Utility to extract clean speech string from potential JSON wrappers
+  function extractCleanSpokenText(text) {
+    if (!text) return "";
+    let cleaned = String(text).trim();
+    if (cleaned.startsWith("```")) {
+      cleaned = cleaned.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+    }
+    if ((cleaned.startsWith("{") && cleaned.endsWith("}")) || cleaned.includes('"response"') || cleaned.includes('"message"')) {
+      try {
+        const parsed = JSON.parse(cleaned);
+        if (parsed.response && typeof parsed.response === "string") return parsed.response.trim();
+        if (parsed.message && typeof parsed.message === "string") return parsed.message.trim();
+        if (parsed.text && typeof parsed.text === "string") return parsed.text.trim();
+        if (parsed.content && typeof parsed.content === "string") return parsed.content.trim();
+        for (const val of Object.values(parsed)) {
+          if (typeof val === "string") return val.trim();
+        }
+      } catch (_) {
+        const m = cleaned.match(/"(?:response|message|text|content)"\s*:\s*"([^"]+)"/);
+        if (m && m[1]) return m[1].replace(/\\"/g, '"').trim();
+      }
+    }
+    if ((cleaned.startsWith('"') && cleaned.endsWith('"')) || (cleaned.startsWith("'") && cleaned.endsWith("'"))) {
+      cleaned = cleaned.slice(1, -1).trim();
+    }
+    return cleaned;
+  }
 
   // Format seconds to MM:SS
   function formatTime(totalSecs) {
@@ -79,11 +136,15 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   // Reset Start Button
-  function resetStartButton(message = "▶️ Start Interview Call") {
+  function resetStartButton(message) {
+    const isConfigured = (voiceEngine === "gemini_live") ? isGeminiLiveConfigured : isElevenLabsConfigured;
+    const defaultMsg = voiceEngine === "gemini_live" 
+      ? "▶️ Start Interview Call (Gemini Flash Live)" 
+      : "▶️ Start Interview Call (ElevenLabs AI)";
     if (startBtn) {
-      startBtn.disabled = !isElevenLabsConfigured;
+      startBtn.disabled = !isConfigured;
       startBtn.style.display = "inline-flex";
-      startBtn.textContent = message;
+      startBtn.textContent = message || defaultMsg;
     }
     if (endBtn) {
       endBtn.style.display = "none";
@@ -92,12 +153,19 @@ document.addEventListener("DOMContentLoaded", () => {
       connectionBadge.className = "badge badge-gray";
       connectionBadge.textContent = "Not Connected";
     }
+    if (liveVoiceMonitor) {
+      liveVoiceMonitor.style.display = "none";
+    }
+    if (doneSpeakingBtn) {
+      doneSpeakingBtn.style.display = "none";
+    }
     updateAudioStatus("Microphone & audio ready", "#94a3b8");
   }
 
   // Append a turn to transcript
   function appendTranscriptTurn(role, text) {
-    if (!text || !text.trim()) return;
+    const cleanText = extractCleanSpokenText(text);
+    if (!cleanText) return;
 
     if (emptyTranscriptMsg) {
       emptyTranscriptMsg.style.display = "none";
@@ -106,7 +174,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const cleanRole = (role === "agent" || role === "interviewer" || role === "ai") ? "interviewer" : "candidate";
     const turn = {
       role: cleanRole,
-      message: text.trim(),
+      message: cleanText,
       time_in_call_secs: elapsedSeconds
     };
     transcriptTurns.push(turn);
@@ -117,7 +185,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const roleLabel = cleanRole === "interviewer" ? "Alex (AI Interviewer)" : (candidateName || "Candidate");
     msgEl.innerHTML = `
       <div class="message-role">${escapeHtml(roleLabel)} <span style="font-weight: normal; font-size: 0.7rem; color: var(--text-muted);">• ${formatTime(elapsedSeconds)}</span></div>
-      <div>${escapeHtml(text.trim())}</div>
+      <div>${escapeHtml(cleanText)}</div>
     `;
 
     if (transcriptBox) {
@@ -169,11 +237,308 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  // Handle Start Interview Call
+  // =========================================================================
+  // GEMINI FLASH LIVE VOICE ENGINE IMPLEMENTATION
+  // =========================================================================
+
+  function speakGeminiTurn(text, onComplete) {
+    const cleanSpeech = extractCleanSpokenText(text);
+    if (!cleanSpeech) {
+      if (onComplete) onComplete();
+      return;
+    }
+
+    isAlexSpeaking = true;
+    if (window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+    }
+
+    // Stop candidate recognition while Alex speaks to prevent self-echo
+    stopGeminiRecognition();
+
+    if (voiceOrb) voiceOrb.className = "pulsing-orb speaking";
+    if (orbIcon) orbIcon.textContent = "🎙️";
+    if (connectionBadge) {
+      connectionBadge.className = "badge badge-indigo";
+      connectionBadge.textContent = "Alex is Speaking";
+    }
+    updateAudioStatus("Alex is speaking aloud...", "#6366f1");
+
+    if (liveMonitorStateText) liveMonitorStateText.textContent = "🔊 Alex is speaking aloud...";
+    if (liveMonitorDot) liveMonitorDot.style.background = "#6366f1";
+    if (liveTranscriptDisplay) liveTranscriptDisplay.innerHTML = '<span style="color: var(--text-muted); font-style: italic;">(Alex is speaking...)</span>';
+    if (doneSpeakingBtn) doneSpeakingBtn.style.display = "none";
+    if (livePauseIndicator) livePauseIndicator.style.display = "none";
+
+    if (!window.speechSynthesis) {
+      // Browser does not support speech synthesis
+      isAlexSpeaking = false;
+      if (onComplete) onComplete();
+      return;
+    }
+
+    const utter = new SpeechSynthesisUtterance(cleanSpeech);
+    const voices = window.speechSynthesis.getVoices();
+    const preferredVoice = voices.find(v => 
+      v.lang.startsWith("en") && (
+        v.name.includes("Google") || 
+        v.name.includes("Natural") || 
+        v.name.includes("Samantha") || 
+        v.name.includes("David") || 
+        v.name.includes("Daniel")
+      )
+    ) || voices.find(v => v.lang.startsWith("en"));
+
+    if (preferredVoice) {
+      utter.voice = preferredVoice;
+    }
+    utter.rate = 1.0;
+    utter.pitch = 1.0;
+
+    let hasEnded = false;
+    const finalizeTurn = () => {
+      if (hasEnded) return;
+      hasEnded = true;
+      isAlexSpeaking = false;
+      if (!isCallActive) return;
+
+      if (voiceOrb) voiceOrb.className = "pulsing-orb listening";
+      if (orbIcon) orbIcon.textContent = "🗣️";
+      if (connectionBadge) {
+        connectionBadge.className = "badge badge-emerald";
+        connectionBadge.textContent = "Listening to You";
+      }
+      updateAudioStatus("Listening • Speak into your microphone...", "#10b981");
+
+      if (liveMonitorStateText) liveMonitorStateText.textContent = "🎙️ Listening to you... Speak into your microphone";
+      if (liveMonitorDot) liveMonitorDot.style.background = "#10b981";
+      if (liveTranscriptDisplay) liveTranscriptDisplay.innerHTML = '<span style="color: var(--text-muted); font-style: italic;">(Alex is listening... Speak your answer now)</span>';
+      currentSpokenCandidateText = "";
+
+      if (onComplete) onComplete();
+    };
+
+    utter.onend = finalizeTurn;
+    utter.onerror = finalizeTurn;
+
+    // Safety timeout in case speech synthesis stalls
+    const wordCount = cleanSpeech.split(" ").length;
+    const estimatedDurationMs = Math.max(2500, (wordCount / 2.5) * 1000 + 1500);
+    setTimeout(finalizeTurn, estimatedDurationMs);
+
+    window.speechSynthesis.speak(utter);
+  }
+
+  function setupGeminiRecognition() {
+    if (!SpeechRecognition) {
+      console.warn("SpeechRecognition not supported in this browser.");
+      updateAudioStatus("Speech recognition unavailable. Please use Chrome, Edge, or enable speech in Brave settings.", "#ef4444");
+      if (braveSpeechNotice) braveSpeechNotice.style.display = "flex";
+      if (voiceFallbackInput) voiceFallbackInput.style.display = "block";
+      return;
+    }
+
+    if (recognitionInstance) return;
+
+    try {
+      recognitionInstance = new SpeechRecognition();
+      recognitionInstance.continuous = true;
+      recognitionInstance.interimResults = true;
+      recognitionInstance.lang = "en-US";
+
+      let speechSilenceTimer = null;
+      let finalAccumulated = "";
+
+      recognitionInstance.onresult = (event) => {
+        if (!isCallActive || isAlexSpeaking || isWaitingForAiReply) return;
+
+        let interim = "";
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+          if (event.results[i].isFinal) {
+            finalAccumulated += " " + event.results[i][0].transcript;
+          } else {
+            interim += event.results[i][0].transcript;
+          }
+        }
+
+        const candidateText = (finalAccumulated + " " + interim).trim();
+        if (candidateText) {
+          currentSpokenCandidateText = candidateText;
+          updateAudioStatus(`🎙️ Hearing you: "${candidateText.slice(-35)}"`, "#10b981");
+
+          if (liveMonitorStateText) liveMonitorStateText.textContent = "🗣️ Hearing you speak...";
+          if (liveMonitorDot) liveMonitorDot.style.background = "#10b981";
+          if (liveTranscriptDisplay) {
+            liveTranscriptDisplay.textContent = `"${candidateText}"`;
+          }
+          if (doneSpeakingBtn) {
+            doneSpeakingBtn.style.display = "inline-flex";
+          }
+          if (livePauseIndicator) {
+            livePauseIndicator.style.display = "block";
+            livePauseIndicator.textContent = "⏳ Pause detected — submitting answer to Alex...";
+          }
+
+          clearTimeout(speechSilenceTimer);
+          // Automatically send turn when candidate pauses for 1.3 seconds
+          speechSilenceTimer = setTimeout(() => {
+            if (candidateText && isCallActive && !isAlexSpeaking && !isWaitingForAiReply) {
+              const toSend = candidateText;
+              finalAccumulated = "";
+              currentSpokenCandidateText = "";
+              sendCandidateTurnToGemini(toSend);
+            }
+          }, 1300);
+        }
+      };
+
+      recognitionInstance.onerror = (e) => {
+        if (e.error === "no-speech") return;
+        console.warn("Speech recognition notice:", e.error);
+
+        // Catch Brave or browser policy network / permission blocks
+        if (e.error === "network" || e.error === "not-allowed" || e.error === "service-not-allowed") {
+          if (braveSpeechNotice) braveSpeechNotice.style.display = "flex";
+          if (voiceFallbackInput) voiceFallbackInput.style.display = "block";
+          updateAudioStatus("Speech recognition service blocked (check Brave settings or use input below)", "#ef4444");
+        }
+      };
+
+      recognitionInstance.onend = () => {
+        isRecognizing = false;
+        if (isCallActive && !isAlexSpeaking && !isWaitingForAiReply) {
+          try {
+            recognitionInstance.start();
+            isRecognizing = true;
+          } catch (_) {}
+        }
+      };
+
+    } catch (e) {
+      console.warn("Speech recognition initialization error:", e);
+      if (braveSpeechNotice) braveSpeechNotice.style.display = "flex";
+      if (voiceFallbackInput) voiceFallbackInput.style.display = "block";
+    }
+  }
+
+  // Handle explicit "Done Speaking" button click (candidate finishes talking & sends immediately)
+  if (doneSpeakingBtn) {
+    doneSpeakingBtn.addEventListener("click", () => {
+      if (currentSpokenCandidateText && isCallActive && !isWaitingForAiReply) {
+        const toSend = currentSpokenCandidateText;
+        currentSpokenCandidateText = "";
+        sendCandidateTurnToGemini(toSend);
+      }
+    });
+  }
+
+  // Handle fallback manual input if speech recognition is blocked in browser
+  if (voiceFallbackSendBtn && voiceFallbackTextInput) {
+    const submitFallback = () => {
+      const text = voiceFallbackTextInput.value.trim();
+      if (text && isCallActive && !isWaitingForAiReply) {
+        voiceFallbackTextInput.value = "";
+        sendCandidateTurnToGemini(text);
+      }
+    };
+    voiceFallbackSendBtn.addEventListener("click", submitFallback);
+    voiceFallbackTextInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        submitFallback();
+      }
+    });
+  }
+
+  function startGeminiRecognition() {
+    if (!recognitionInstance && SpeechRecognition) {
+      setupGeminiRecognition();
+    }
+    if (recognitionInstance && !isRecognizing) {
+      try {
+        recognitionInstance.start();
+        isRecognizing = true;
+      } catch (_) {}
+    }
+  }
+
+  function stopGeminiRecognition() {
+    if (recognitionInstance && isRecognizing) {
+      try {
+        recognitionInstance.stop();
+      } catch (_) {}
+      isRecognizing = false;
+    }
+  }
+
+  async function sendCandidateTurnToGemini(candidateMessage) {
+    if (!candidateMessage || !candidateMessage.trim() || isWaitingForAiReply) return;
+
+    isWaitingForAiReply = true;
+    stopGeminiRecognition();
+
+    appendTranscriptTurn("candidate", candidateMessage.trim());
+
+    if (voiceOrb) voiceOrb.className = "pulsing-orb";
+    if (orbIcon) orbIcon.textContent = "🧠";
+    if (connectionBadge) {
+      connectionBadge.className = "badge badge-indigo";
+      connectionBadge.textContent = "Alex is Thinking...";
+    }
+    updateAudioStatus("Alex is formulating response...", "#6366f1");
+
+    if (liveMonitorStateText) liveMonitorStateText.textContent = "🧠 Alex is formulating response...";
+    if (liveMonitorDot) liveMonitorDot.style.background = "#6366f1";
+    if (liveTranscriptDisplay) {
+      liveTranscriptDisplay.innerHTML = `<span style="color: #4f46e5; font-weight: 600;">✓ Sent: "${escapeHtml(candidateMessage.trim())}"</span>`;
+    }
+    if (doneSpeakingBtn) doneSpeakingBtn.style.display = "none";
+    if (livePauseIndicator) livePauseIndicator.style.display = "none";
+
+    try {
+      const res = await fetch(`/api/interviews/${interviewId}/gemini-live/turn`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Accept": "application/json" },
+        body: JSON.stringify({
+          candidate_message: candidateMessage.trim(),
+          history: transcriptTurns
+        })
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "Failed to process turn with Gemini.");
+      }
+
+      const aiReply = extractCleanSpokenText(data.turn.message);
+      appendTranscriptTurn("interviewer", aiReply);
+
+      speakGeminiTurn(aiReply, () => {
+        isWaitingForAiReply = false;
+        startGeminiRecognition();
+      });
+
+    } catch (err) {
+      console.error("Gemini Live turn error:", err);
+      const fallbackMsg = `Thank you for sharing that, ${candidateName}. Could you give a specific example demonstrating your approach?`;
+      appendTranscriptTurn("interviewer", fallbackMsg);
+      speakGeminiTurn(fallbackMsg, () => {
+        isWaitingForAiReply = false;
+        startGeminiRecognition();
+      });
+    }
+  }
+
+  // =========================================================================
+  // START CALL HANDLER (BRANCHES FOR ELEVENLABS vs GEMINI LIVE)
+  // =========================================================================
+
   if (startBtn) {
     startBtn.addEventListener("click", async () => {
-      if (!isElevenLabsConfigured) {
-        alert("ElevenLabs credentials are not configured. Please check your .env settings.");
+      const isConfigured = (voiceEngine === "gemini_live") ? isGeminiLiveConfigured : isElevenLabsConfigured;
+      if (!isConfigured) {
+        const engineName = voiceEngine === "gemini_live" ? "Gemini API Key" : "ElevenLabs API Key & Agent ID";
+        alert(`${engineName} is not configured in your .env file.`);
         return;
       }
 
@@ -186,11 +551,10 @@ document.addEventListener("DOMContentLoaded", () => {
       updateAudioStatus("Requesting microphone permission...", "#f59e0b");
 
       try {
-        // Step 1: Explicitly request and verify microphone permission
+        // Step 1: Explicitly verify microphone permission
         let micStream;
         try {
           micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-          // Stop probe track immediately; SDK will acquire its own stream
           micStream.getTracks().forEach((track) => track.stop());
         } catch (micErr) {
           console.error("Microphone permission denied or failed:", micErr);
@@ -202,9 +566,9 @@ document.addEventListener("DOMContentLoaded", () => {
           return;
         }
 
-        // Step 2: Fetch secure conversation credentials from server
+        // Step 2: Fetch secure conversation credentials
         startBtn.textContent = "Connecting to Voice Agent...";
-        updateAudioStatus("Obtaining secure interview session token...", "#f59e0b");
+        updateAudioStatus("Initializing voice session...", "#f59e0b");
         if (connectionBadge) {
           connectionBadge.textContent = "Securing Session";
         }
@@ -216,7 +580,42 @@ document.addEventListener("DOMContentLoaded", () => {
           throw new Error(creds.error || "Failed to obtain interview conversation credentials.");
         }
 
-        // Step 3: Start conversation session via ElevenLabs Client SDK
+        // BRANCH: GEMINI FLASH LIVE VOICE ENGINE
+        if (voiceEngine === "gemini_live" || creds.voice_engine === "gemini_live") {
+          isCallActive = true;
+          startBtn.style.display = "none";
+          if (endBtn) {
+            endBtn.style.display = "inline-flex";
+          }
+          if (liveVoiceMonitor) {
+            liveVoiceMonitor.style.display = "block";
+          }
+
+          if (studioStateTitle) {
+            studioStateTitle.textContent = "Interview in Progress (Gemini Flash Live)";
+          }
+          if (studioStateSubtitle) {
+            studioStateSubtitle.textContent =
+              "Alex is conducting your spoken interview powered by Gemini Flash Live. Speak your answer into your microphone.";
+          }
+
+          startTimer();
+          setupGeminiRecognition();
+
+          // Speak initial opening greeting from Gemini
+          const rawGreeting = creds.greeting ? creds.greeting.message : 
+            `Hello ${candidateName}! Welcome to your spoken interview for the ${jobTitle} role. I'm Alex. To get started, could you please introduce yourself and tell me what interests you most about this position?`;
+          const initialGreeting = extractCleanSpokenText(rawGreeting);
+
+          appendTranscriptTurn("interviewer", initialGreeting);
+          speakGeminiTurn(initialGreeting, () => {
+            startGeminiRecognition();
+          });
+
+          return;
+        }
+
+        // BRANCH: ELEVENLABS CONVERSATIONAL AI ENGINE
         updateAudioStatus("Connecting audio stream...", "#f59e0b");
         if (connectionBadge) {
           connectionBadge.textContent = "Opening Audio Stream";
@@ -272,7 +671,6 @@ document.addEventListener("DOMContentLoaded", () => {
             }
           },
           onModeChange: ({ mode }) => {
-            console.log("ElevenLabs mode:", mode);
             if (mode === "speaking") {
               if (voiceOrb) voiceOrb.className = "pulsing-orb speaking";
               if (orbIcon) orbIcon.textContent = "🎙️";
@@ -292,7 +690,6 @@ document.addEventListener("DOMContentLoaded", () => {
             }
           },
           onMessage: (messagePayload) => {
-            console.log("ElevenLabs message received:", messagePayload);
             const rawRole = messagePayload.role || (messagePayload.source === "user" ? "user" : "agent");
             const text = messagePayload.message || "";
             appendTranscriptTurn(rawRole, text);
@@ -306,7 +703,6 @@ document.addEventListener("DOMContentLoaded", () => {
             updateAudioStatus("Audio Notice: " + (message || "Connection event"), "#ef4444");
           },
           onStatusChange: ({ status }) => {
-            console.log("ElevenLabs status change:", status);
             if (status === "connecting") {
               if (connectionBadge) {
                 connectionBadge.className = "badge badge-amber";
@@ -332,7 +728,10 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  // Handle End Interview & Finalize
+  // =========================================================================
+  // END CALL & FINALIZATION
+  // =========================================================================
+
   if (endBtn) {
     endBtn.addEventListener("click", async () => {
       const candidateTurns = transcriptTurns.filter((t) => t.role === "candidate");
@@ -356,11 +755,19 @@ document.addEventListener("DOMContentLoaded", () => {
   async function finalizeAndRedirect(reason) {
     isFinalizing = true;
     stopTimer();
+    if (liveVoiceMonitor) liveVoiceMonitor.style.display = "none";
+    if (doneSpeakingBtn) doneSpeakingBtn.style.display = "none";
+
+    // Clean up voice synthesis & recognition
+    if (window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+    }
+    stopGeminiRecognition();
 
     if (endBtn) endBtn.disabled = true;
     if (finalizingModal) finalizingModal.classList.add("active");
 
-    // Close conversation session gracefully
+    // Close ElevenLabs conversation session gracefully if active
     if (conversationInstance) {
       try {
         await conversationInstance.endSession();
@@ -381,7 +788,7 @@ document.addEventListener("DOMContentLoaded", () => {
         })
       });
 
-      // Step 2: Trigger report evaluation
+      // Step 2: Trigger report evaluation using interview's chosen LLM model
       const finalRes = await fetch(`/api/interviews/${interviewId}/finalize`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -403,7 +810,6 @@ document.addEventListener("DOMContentLoaded", () => {
       console.error("Finalization error:", err);
       if (finalizingModal) finalizingModal.classList.remove("active");
       alert("Evaluation Notice: " + err.message);
-      // Return to interview preparation or dashboard
       window.location.href = `/interviews/${interviewId}`;
     }
   }
@@ -415,6 +821,8 @@ document.addEventListener("DOMContentLoaded", () => {
         `/api/interviews/${interviewId}/end`,
         JSON.stringify({ reason: "interrupted" })
       );
+      if (window.speechSynthesis) window.speechSynthesis.cancel();
+      stopGeminiRecognition();
       if (conversationInstance) {
         try {
           conversationInstance.endSession();

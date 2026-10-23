@@ -6,6 +6,8 @@ document.addEventListener("DOMContentLoaded", () => {
   const form = document.getElementById("setupForm");
   const resumeInput = document.getElementById("resume_file");
   const resumePreview = document.getElementById("resumePreview");
+  const jdInput = document.getElementById("jd_file");
+  const jdPreview = document.getElementById("jdPreview");
   const submitBtn = document.getElementById("submitBtn");
   const btnText = document.getElementById("btnText");
   const btnSpinner = document.getElementById("btnSpinner");
@@ -60,6 +62,23 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   setupFileInputPreview(resumeInput, resumePreview, "resumeDropzone");
+  if (jdInput && jdPreview) {
+    setupFileInputPreview(jdInput, jdPreview, "jdDropzone");
+  }
+
+  // Model selection card styling toggle
+  const modelRadios = document.querySelectorAll('input[name="llm_provider"]');
+  modelRadios.forEach(radio => {
+    radio.addEventListener("change", () => {
+      document.querySelectorAll(".model-card").forEach(card => {
+        card.style.borderColor = "var(--border-color)";
+      });
+      const parentLabel = radio.closest(".model-card");
+      if (parentLabel) {
+        parentLabel.style.borderColor = "var(--primary)";
+      }
+    });
+  });
 
   // Form submission
   form.addEventListener("submit", async (e) => {

@@ -18,9 +18,22 @@
         <div class="brand-icon">🎙️</div>
         <span>AI Interview Studio</span>
       </a>
-      <div class="nav-links">
-        <a href="{{ url_for('dashboard.index') }}" class="nav-link">Dashboard</a>
-        <a href="{{ url_for('interviews.new_interview') }}" class="btn btn-primary btn-sm">+ Start Interview</a>
+      <div class="nav-links" style="display: flex; align-items: center; gap: 0.85rem;">
+        {% if session.get('user_id') %}
+          <a href="{{ url_for('dashboard.index') }}" class="nav-link">Dashboard</a>
+          <a href="{{ url_for('interviews.new_interview') }}" class="btn btn-primary btn-sm">+ Start Interview</a>
+          <div style="display: flex; align-items: center; gap: 0.5rem; margin-left: 0.5rem; padding-left: 0.75rem; border-left: 1px solid var(--border-color);">
+            <span style="font-size: 0.85rem; font-weight: 600; color: var(--text-main); display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.25rem 0.65rem; background: var(--bg-muted); border-radius: var(--radius-full);">
+              👤 {{ session.get('user_name', 'Account') }}
+            </span>
+            <a href="{{ url_for('auth.logout') }}" class="btn btn-secondary btn-sm" style="color: var(--text-secondary);" title="Sign Out">
+              Log Out
+            </a>
+          </div>
+        {% else %}
+          <a href="{{ url_for('auth.login') }}" class="nav-link">Log In</a>
+          <a href="{{ url_for('auth.signup') }}" class="btn btn-primary btn-sm">Sign Up Free</a>
+        {% endif %}
       </div>
     </div>
   </nav>
