@@ -137,10 +137,16 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Reset Start Button
   function resetStartButton(message) {
-    const isConfigured = (voiceEngine === "gemini_live") ? isGeminiLiveConfigured : isElevenLabsConfigured;
+    const isConfigured = (voiceEngine === "gemini_live") 
+      ? isGeminiLiveConfigured 
+      : (voiceEngine === "openai_realtime")
+        ? isOpenaiRealtimeConfigured
+        : isElevenLabsConfigured;
     const defaultMsg = voiceEngine === "gemini_live" 
       ? "▶️ Start Interview Call (Gemini Flash Live)" 
-      : "▶️ Start Interview Call (ElevenLabs AI)";
+      : voiceEngine === "openai_realtime"
+        ? "▶️ Start Interview Call (OpenAI Realtime WebRTC)"
+        : "▶️ Start Interview Call (ElevenLabs AI)";
     if (startBtn) {
       startBtn.disabled = !isConfigured;
       startBtn.style.display = "inline-flex";
@@ -530,14 +536,144 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   // =========================================================================
-  // START CALL HANDLER (BRANCHES FOR ELEVENLABS vs GEMINI LIVE)
+  // OPENAI REALTIME VOICE (WEBRTC) ENGINE IMPLEMENTATION
+  // =========================================================================
+  let peerConnection = null;
+  let dataChannel = null;
+  let localAudioStream = null;
+  let remoteAudioElement = null;
+  let currentAiTurnAccumulator = "";
+
+  function cleanupOpenAIRealtime() {
+    if (localAudioStream) {
+      localAudioStream.getTracks().forEach((track) => {
+        try { track.stop(); } catch (_) {}
+      });
+      localAudioStream = null;
+    }
+    if (dataChannel) {
+      try { dataChannel.close(); } catch (_) {}
+      dataChannel = null;
+    }
+    if (peerConnection) {
+      try { peerConnection.close(); } catch (_) {}
+      peerConnection = null;
+    }
+    if (remoteAudioElement) {
+      try {
+        remoteAudioElement.srcObject = null;
+        remoteAudioElement.remove();
+      } catch (_) {}
+      remoteAudioElement = null;
+    }
+    currentAiTurnAccumulator = "";
+  }
+
+  function handleOpenAIRealtimeEvent(event) {
+    if (!event || !event.type) return;
+
+    switch (event.type) {
+      // Candidate speech detection (server VAD) & interruption/barge-in
+      case "input_audio_buffer.speech_started":
+        console.log("[OpenAI Realtime] Candidate speech started (Barge-in / listening)");
+        if (voiceOrb) voiceOrb.className = "pulsing-orb listening";
+        if (orbIcon) orbIcon.textContent = "🗣️";
+        if (connectionBadge) {
+          connectionBadge.className = "badge badge-emerald";
+          connectionBadge.textContent = "Listening to You";
+        }
+        updateAudioStatus("Listening • You are speaking...", "#10b981");
+        break;
+
+      case "input_audio_buffer.speech_stopped":
+        console.log("[OpenAI Realtime] Candidate speech stopped");
+        if (voiceOrb) voiceOrb.className = "pulsing-orb";
+        if (orbIcon) orbIcon.textContent = "🧠";
+        if (connectionBadge) {
+          connectionBadge.className = "badge badge-indigo";
+          connectionBadge.textContent = "Alex is Listening / Formulating...";
+        }
+        updateAudioStatus("Alex is processing your response...", "#6366f1");
+        break;
+
+      // Candidate transcription completed by Whisper
+      case "conversation.item.input_audio_transcription.completed":
+        if (event.transcript && event.transcript.trim()) {
+          console.log("[OpenAI Realtime] Candidate transcript:", event.transcript);
+          appendTranscriptTurn("candidate", event.transcript.trim());
+        }
+        break;
+
+      // Model audio response generation
+      case "response.created":
+      case "response.output_item.added":
+        if (voiceOrb) voiceOrb.className = "pulsing-orb speaking";
+        if (orbIcon) orbIcon.textContent = "🎙️";
+        if (connectionBadge) {
+          connectionBadge.className = "badge badge-indigo";
+          connectionBadge.textContent = "Alex is Speaking";
+        }
+        updateAudioStatus("Alex is speaking aloud...", "#6366f1");
+        currentAiTurnAccumulator = "";
+        break;
+
+      // Streaming audio transcript chunks
+      case "response.audio_transcript.delta":
+        if (event.delta) {
+          currentAiTurnAccumulator += event.delta;
+        }
+        break;
+
+      // Finalized AI audio transcript
+      case "response.audio_transcript.done":
+        const completedText = (event.transcript || currentAiTurnAccumulator || "").trim();
+        if (completedText) {
+          console.log("[OpenAI Realtime] Alex transcript:", completedText);
+          appendTranscriptTurn("interviewer", completedText);
+        }
+        currentAiTurnAccumulator = "";
+        break;
+
+      case "response.done":
+        if (isCallActive) {
+          if (voiceOrb) voiceOrb.className = "pulsing-orb listening";
+          if (orbIcon) orbIcon.textContent = "🗣️";
+          if (connectionBadge) {
+            connectionBadge.className = "badge badge-emerald";
+            connectionBadge.textContent = "Listening to You";
+          }
+          updateAudioStatus("Listening • Speak into your microphone", "#10b981");
+        }
+        break;
+
+      case "error":
+        console.error("[OpenAI Realtime] Server error event:", event.error);
+        const errMsg = event.error ? (event.error.message || JSON.stringify(event.error)) : "Realtime API event notice";
+        updateAudioStatus(`Realtime notice: ${errMsg}`, "#f59e0b");
+        break;
+
+      default:
+        break;
+    }
+  }
+
+  // =========================================================================
+  // START CALL HANDLER (BRANCHES FOR ELEVENLABS vs GEMINI LIVE vs OPENAI REALTIME)
   // =========================================================================
 
   if (startBtn) {
     startBtn.addEventListener("click", async () => {
-      const isConfigured = (voiceEngine === "gemini_live") ? isGeminiLiveConfigured : isElevenLabsConfigured;
+      const isConfigured = (voiceEngine === "gemini_live") 
+        ? isGeminiLiveConfigured 
+        : (voiceEngine === "openai_realtime")
+          ? isOpenaiRealtimeConfigured
+          : isElevenLabsConfigured;
       if (!isConfigured) {
-        const engineName = voiceEngine === "gemini_live" ? "Gemini API Key" : "ElevenLabs API Key & Agent ID";
+        const engineName = (voiceEngine === "gemini_live") 
+          ? "Gemini API Key" 
+          : (voiceEngine === "openai_realtime")
+            ? "OpenAI API Key"
+            : "ElevenLabs API Key & Agent ID";
         alert(`${engineName} is not configured in your .env file.`);
         return;
       }
@@ -610,6 +746,167 @@ document.addEventListener("DOMContentLoaded", () => {
           appendTranscriptTurn("interviewer", initialGreeting);
           speakGeminiTurn(initialGreeting, () => {
             startGeminiRecognition();
+          });
+
+          return;
+        }
+
+        // BRANCH: OPENAI REALTIME VOICE (WEBRTC) ENGINE
+        if (voiceEngine === "openai_realtime" || creds.voice_engine === "openai_realtime") {
+          updateAudioStatus("Negotiating WebRTC audio connection...", "#f59e0b");
+          if (connectionBadge) {
+            connectionBadge.textContent = "WebRTC Handshake";
+          }
+
+          // Step 1: Capture local microphone
+          localAudioStream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: true
+            }
+          });
+
+          // Step 2: Initialize RTCPeerConnection
+          peerConnection = new RTCPeerConnection({
+            iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+          });
+
+          // Step 3: Remote audio element
+          remoteAudioElement = document.createElement("audio");
+          remoteAudioElement.autoplay = true;
+          peerConnection.ontrack = (event) => {
+            console.log("[OpenAI Realtime] Remote audio track attached");
+            remoteAudioElement.srcObject = event.streams[0];
+          };
+
+          // Step 4: Add local audio track
+          localAudioStream.getTracks().forEach((track) => {
+            peerConnection.addTrack(track, localAudioStream);
+          });
+
+          // Step 5: Create Data Channel before offer
+          dataChannel = peerConnection.createDataChannel("oai-events");
+
+          dataChannel.onopen = () => {
+            console.log("[OpenAI Realtime] Data channel opened");
+            isCallActive = true;
+            startTimer();
+
+            startBtn.style.display = "none";
+            if (endBtn) endBtn.style.display = "inline-flex";
+
+            if (studioStateTitle) {
+              studioStateTitle.textContent = "Interview in Progress (OpenAI Realtime)";
+            }
+            if (studioStateSubtitle) {
+              studioStateSubtitle.textContent =
+                "Alex is speaking with you live over low-latency WebRTC. Speak naturally into your microphone; Alex will listen and you can interrupt anytime.";
+            }
+
+            if (connectionBadge) {
+              connectionBadge.className = "badge badge-emerald";
+              connectionBadge.textContent = "Live WebRTC Connected";
+            }
+            updateAudioStatus("Connected • Realtime audio active", "#10b981");
+
+            // Trigger initial opening greeting from Alex
+            try {
+              const triggerGreeting = {
+                type: "response.create",
+                response: {
+                  modalities: ["audio", "text"],
+                  instructions: `Greet ${candidateName} warmly for their interview for the ${jobTitle} role, introduce yourself as Alex, and ask the first opening question.`
+                }
+              };
+              dataChannel.send(JSON.stringify(triggerGreeting));
+            } catch (trigErr) {
+              console.warn("[OpenAI Realtime] Initial greeting trigger error:", trigErr);
+            }
+          };
+
+          dataChannel.onmessage = (e) => {
+            try {
+              const parsedEvent = JSON.parse(e.data);
+              handleOpenAIRealtimeEvent(parsedEvent);
+            } catch (err) {
+              console.warn("[OpenAI Realtime] JSON parse warning:", err);
+            }
+          };
+
+          dataChannel.onerror = (err) => {
+            console.error("[OpenAI Realtime] Data channel error:", err);
+            updateAudioStatus("Data channel error", "#ef4444");
+          };
+
+          dataChannel.onclose = () => {
+            console.log("[OpenAI Realtime] Data channel closed");
+          };
+
+          // Step 6: Create SDP Offer
+          const offer = await peerConnection.createOffer();
+          await peerConnection.setLocalDescription(offer);
+
+          const targetModel = creds.model || "gpt-4o-realtime-preview-2024-12-17";
+          let answerSdp = null;
+
+          // Attempt direct fetch to OpenAI Realtime endpoint using ephemeral client_secret
+          if (creds.client_secret && !creds.client_secret.startsWith("ek_mock")) {
+            const candidateUrls = [
+              `https://api.openai.com/v1/realtime/calls?model=${encodeURIComponent(targetModel)}`,
+              "https://api.openai.com/v1/realtime/calls",
+              `https://api.openai.com/v1/realtime?model=${encodeURIComponent(targetModel)}`
+            ];
+
+            for (const url of candidateUrls) {
+              try {
+                const sdpRes = await fetch(url, {
+                  method: "POST",
+                  headers: {
+                    "Authorization": `Bearer ${creds.client_secret}`,
+                    "Content-Type": "application/sdp"
+                  },
+                  body: offer.sdp
+                });
+
+                if (sdpRes.ok) {
+                  answerSdp = await sdpRes.text();
+                  break;
+                } else {
+                  console.warn(`[OpenAI Realtime] Direct SDP exchange status (${url}):`, sdpRes.status);
+                  if (sdpRes.status !== 404) {
+                    break;
+                  }
+                }
+              } catch (directErr) {
+                console.warn(`[OpenAI Realtime] Direct SDP exchange error (${url}):`, directErr);
+              }
+            }
+          }
+
+          // Fallback: relay through backend endpoint
+          if (!answerSdp) {
+            const relayRes = await fetch(`/api/interviews/${interviewId}/openai-realtime/relay`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                sdp: offer.sdp,
+                client_secret: creds.client_secret,
+                model: targetModel
+              })
+            });
+
+            const relayData = await relayRes.json();
+            if (!relayRes.ok || !relayData.sdp) {
+              throw new Error(relayData.error || "Failed to establish WebRTC connection with OpenAI Realtime.");
+            }
+            answerSdp = relayData.sdp;
+          }
+
+          // Step 7: Apply remote description (SDP Answer)
+          await peerConnection.setRemoteDescription({
+            type: "answer",
+            sdp: answerSdp
           });
 
           return;
@@ -763,6 +1060,7 @@ document.addEventListener("DOMContentLoaded", () => {
       window.speechSynthesis.cancel();
     }
     stopGeminiRecognition();
+    cleanupOpenAIRealtime();
 
     if (endBtn) endBtn.disabled = true;
     if (finalizingModal) finalizingModal.classList.add("active");
@@ -823,6 +1121,7 @@ document.addEventListener("DOMContentLoaded", () => {
       );
       if (window.speechSynthesis) window.speechSynthesis.cancel();
       stopGeminiRecognition();
+      cleanupOpenAIRealtime();
       if (conversationInstance) {
         try {
           conversationInstance.endSession();

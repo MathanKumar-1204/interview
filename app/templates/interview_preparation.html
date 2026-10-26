@@ -198,6 +198,8 @@
           <span style="font-weight: 700; font-size: 1.05rem; color: var(--text-main);">
             {% if interview.voice_engine == 'gemini_live' %}
               ♊ Gemini Flash Live Voice Engine
+            {% elif interview.voice_engine == 'openai_realtime' %}
+              ⚡ OpenAI Realtime Voice (WebRTC)
             {% else %}
               🎙️ ElevenLabs Conversational AI
             {% endif %}

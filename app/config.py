@@ -80,6 +80,8 @@ class Config:
     OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini").strip()
     CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-3-5-sonnet-20241022").strip()
     GEMINI_LIVE_MODEL = os.getenv("GEMINI_LIVE_MODEL", "gemini-2.0-flash-exp").strip()
+    OPENAI_REALTIME_MODEL = os.getenv("OPENAI_REALTIME_MODEL", "gpt-realtime-2.1").strip()
+    OPENAI_REALTIME_VOICE = os.getenv("OPENAI_REALTIME_VOICE", "alloy").strip()
     
     # Auto-detect Gemini if key starts with AIza
     if LLM_API_KEY.startswith("AIza") and LLM_PROVIDER not in ("gemini", "mock"):
@@ -104,6 +106,11 @@ class Config:
     @classmethod
     def is_gemini_live_configured(cls) -> bool:
         return bool(cls.GEMINI_API_KEY and not cls.GEMINI_API_KEY.startswith("your_"))
+
+    @classmethod
+    def is_openai_realtime_configured(cls) -> bool:
+        key = cls.OPENAI_API_KEY or cls.LLM_API_KEY
+        return bool(key and not key.startswith("your_") and not key.startswith("AIza"))
 
     @classmethod
     def is_mongo_configured(cls) -> bool:
@@ -140,6 +147,7 @@ class TestingConfig(Config):
     LLM_PROVIDER = "mock"
     ELEVENLABS_AGENT_ID = "mock-agent-id-123"
     ELEVENLABS_API_KEY = "mock-api-key-xyz"
+    OPENAI_API_KEY = "mock-openai-key-realtime"
 
 
 class ProductionConfig(Config):

@@ -90,6 +90,7 @@
             <span class="badge badge-emerald" style="font-size: 0.85rem; padding: 0.35rem 0.75rem;">
               🎙️ Voice: 
               {% if preferred_voice == 'elevenlabs' %}ElevenLabs Conversational AI
+              {% elif preferred_voice == 'openai_realtime' %}OpenAI Realtime Voice (WebRTC)
               {% else %}Gemini Flash Live Voice{% endif %}
             </span>
           </div>

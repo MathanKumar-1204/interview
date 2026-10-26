@@ -47,6 +47,7 @@ def view_preparation(interview_id: str):
         plan=interview.interview_plan or {},
         elevenlabs_ready=Config.is_elevenlabs_configured(),
         gemini_live_ready=Config.is_gemini_live_configured(),
+        openai_realtime_ready=Config.is_openai_realtime_configured(),
         voice_engine=interview.voice_engine,
         llm_provider=interview.llm_provider,
         InterviewStatus=InterviewStatus
@@ -67,6 +68,7 @@ def live_interview(interview_id: str):
 
     elevenlabs_ready = Config.is_elevenlabs_configured()
     gemini_live_ready = Config.is_gemini_live_configured()
+    openai_realtime_ready = Config.is_openai_realtime_configured()
     auth_mode = Config.ELEVENLABS_AUTH_MODE
     agent_id = Config.ELEVENLABS_AGENT_ID
 
@@ -75,6 +77,7 @@ def live_interview(interview_id: str):
         interview=interview,
         elevenlabs_ready=elevenlabs_ready,
         gemini_live_ready=gemini_live_ready,
+        openai_realtime_ready=openai_realtime_ready,
         voice_engine=interview.voice_engine,
         llm_provider=interview.llm_provider,
         auth_mode=auth_mode,

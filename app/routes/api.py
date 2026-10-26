@@ -43,8 +43,8 @@ def create_interview():
 
     pref_voice = session.get("preferred_voice_engine", "gemini_live")
     voice_engine = request.form.get("voice_engine", pref_voice).strip().lower()
-    if voice_engine not in ("elevenlabs", "gemini_live"):
-        voice_engine = pref_voice if pref_voice in ("elevenlabs", "gemini_live") else "gemini_live"
+    if voice_engine not in ("elevenlabs", "gemini_live", "openai_realtime"):
+        voice_engine = pref_voice if pref_voice in ("elevenlabs", "gemini_live", "openai_realtime") else "gemini_live"
 
     if not candidate_name:
         return jsonify({"error": "Candidate name is required."}), 400
@@ -313,7 +313,7 @@ def update_user_preferences():
 
     if llm in ("gemini", "openai", "claude", "mock"):
         session["preferred_llm_provider"] = llm
-    if voice in ("gemini_live", "elevenlabs"):
+    if voice in ("gemini_live", "elevenlabs", "openai_realtime"):
         session["preferred_voice_engine"] = voice
     session.modified = True
 
@@ -365,6 +365,39 @@ def get_conversation_credentials(interview_id: str):
         except Exception as e:
             return jsonify({"error": f"Failed to initialize Gemini Live session: {str(e)}"}), 500
 
+    # OpenAI Realtime Voice engine branch (WebRTC)
+    if interview.voice_engine == "openai_realtime":
+        if not Config.is_openai_realtime_configured():
+            return jsonify({
+                "error": "OpenAI Realtime Voice is not configured. Please ensure OPENAI_API_KEY is set in your .env file."
+            }), 503
+
+        try:
+            from app.services.openai_realtime_service import (
+                OpenAIRealtimeService,
+                OpenAIRealtimeConfigError,
+                OpenAIRealtimeAPIError
+            )
+            realtime_service = OpenAIRealtimeService()
+            session_data = realtime_service.create_realtime_session(interview)
+
+            if interview.status != InterviewStatus.IN_PROGRESS:
+                interview.status = InterviewStatus.IN_PROGRESS
+                interview.started_at = datetime.now(timezone.utc)
+                db.session.commit()
+
+            return jsonify({
+                "success": True,
+                "voice_engine": "openai_realtime",
+                **session_data
+            })
+        except OpenAIRealtimeConfigError as rce:
+            return jsonify({"error": str(rce)}), 503
+        except OpenAIRealtimeAPIError as rae:
+            return jsonify({"error": f"OpenAI Realtime session error: {str(rae)}"}), 502
+        except Exception as e:
+            return jsonify({"error": f"Failed to initialize OpenAI Realtime session: {str(e)}"}), 500
+
     # ElevenLabs engine branch
     service = ElevenLabsService()
     try:
@@ -409,6 +442,33 @@ def gemini_live_turn(interview_id: str):
     reply = service.process_turn(interview, candidate_message, history)
     print(f"[GeminiLive] Alex response: '{reply.get('message', '')}'")
     return jsonify({"success": True, "turn": reply})
+
+
+@api_bp.route("/interviews/<interview_id>/openai-realtime/relay", methods=["POST"])
+def openai_realtime_relay(interview_id: str):
+    """
+    Relay the WebRTC SDP offer to OpenAI's Realtime endpoint and return the answer SDP.
+    Provides a fallback if direct client-side fetch to OpenAI encounters CORS or network obstacles.
+    """
+    interview = get_or_restore_interview(interview_id)
+    if not interview:
+        return jsonify({"error": "Interview not found."}), 404
+
+    data = request.get_json(silent=True) or {}
+    sdp_offer = data.get("sdp", "").strip()
+    ephemeral_key = data.get("client_secret", "").strip()
+    model = data.get("model")
+
+    if not sdp_offer:
+        return jsonify({"error": "SDP offer is required."}), 400
+
+    try:
+        from app.services.openai_realtime_service import OpenAIRealtimeService
+        service = OpenAIRealtimeService()
+        answer_sdp = service.relay_sdp_offer(sdp_offer, ephemeral_key, model=model)
+        return jsonify({"success": True, "sdp": answer_sdp})
+    except Exception as e:
+        return jsonify({"error": f"SDP relay failed: {str(e)}"}), 502
 
 
 @api_bp.route("/interviews/<interview_id>/context", methods=["GET"])
