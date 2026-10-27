@@ -12,9 +12,10 @@ PROMPT_FILE = Path(__file__).resolve().parent.parent / "prompts" / "evaluator.tx
 
 class CompetencyScoreItem(BaseModel):
     id: str = Field(default="")
-    name: str = Field(default="Competency")
-    score: Optional[int] = Field(None, ge=0, le=5, description="Score 0 to 5, or None if Not Assessed")
-    weight: int = Field(20, description="Percentage weight from the interview plan")
+    name: str = Field(default="Performance Dimension")
+    score: Optional[int] = Field(None, ge=0, le=100, description="Score on 0 to 100 scale, or None if Not Assessed")
+    weight: int = Field(20, description="Percentage weight from the evaluation model")
+    benchmark_level: Optional[str] = Field("Proficient", description="Exceptional, Proficient, Developing, or Significant Gap")
     rationale: str = Field(default="")
     supporting_quote: Optional[str] = None
     improvement_recommendation: str = Field(default="")
@@ -24,13 +25,40 @@ class CompetencyScoreItem(BaseModel):
     def handle_score_aliases(cls, data: Any) -> Any:
         if isinstance(data, dict):
             if not data.get("id"):
-                data["id"] = data.get("competency_id") or "comp"
+                data["id"] = data.get("dimension_id") or data.get("competency_id") or data.get("slug") or "dim"
             if not data.get("name"):
-                data["name"] = data.get("title") or "Competency"
+                data["name"] = data.get("dimension") or data.get("dimension_name") or data.get("title") or "Performance Dimension"
             if not data.get("rationale"):
-                data["rationale"] = data.get("feedback") or data.get("assessment") or ""
+                data["rationale"] = data.get("feedback") or data.get("assessment") or data.get("reasoning") or ""
             if not data.get("improvement_recommendation"):
-                data["improvement_recommendation"] = data.get("recommendation") or data.get("improvement") or ""
+                data["improvement_recommendation"] = data.get("recommendation") or data.get("improvement") or data.get("suggestion") or ""
+
+            # Normalize 0-5 scores to 0-100 scale if needed
+            raw_score = data.get("score")
+            if raw_score is not None:
+                try:
+                    num_score = float(raw_score)
+                    if 0 <= num_score <= 5:
+                        data["score"] = int(round(num_score * 20))
+                    else:
+                        data["score"] = int(round(min(100, max(0, num_score))))
+                except (ValueError, TypeError):
+                    data["score"] = None
+
+            # Calibrate benchmark level label
+            score_val = data.get("score")
+            if score_val is not None:
+                if score_val >= 90:
+                    data["benchmark_level"] = "Exceptional"
+                elif score_val >= 75:
+                    data["benchmark_level"] = "Proficient"
+                elif score_val >= 60:
+                    data["benchmark_level"] = "Developing"
+                else:
+                    data["benchmark_level"] = "Significant Gap"
+            else:
+                data["benchmark_level"] = "Not Assessed"
+
         return data
 
 
@@ -56,25 +84,32 @@ class EvaluationReportSchema(BaseModel):
             if not data.get("overall_summary") and data.get("summary"):
                 data["overall_summary"] = data.get("summary")
             if not data.get("overall_score") and data.get("score") is not None:
-                data["overall_score"] = int(data.get("score"))
-            if not data.get("competency_scores") and data.get("competencies"):
-                data["competency_scores"] = data.get("competencies")
+                try:
+                    s = float(data.get("score"))
+                    data["overall_score"] = int(round(s * 20 if s <= 5 else s))
+                except Exception:
+                    data["overall_score"] = 0
+            if not data.get("competency_scores"):
+                data["competency_scores"] = data.get("dimensions") or data.get("dimension_scores") or data.get("competencies") or []
         return data
 
 
 class EvaluationService:
-    """Evaluates interview transcripts against planned competencies and creates structured reports."""
+    """Evaluates interview transcripts against objective role dimensions using a real-time scoring algorithm."""
 
     def __init__(self, llm_service: Optional[LLMService] = None):
         self.llm = llm_service or LLMService()
 
     @staticmethod
-    def calculate_weighted_overall_score(competency_scores: List[CompetencyScoreItem]) -> int:
+    def calculate_weighted_overall_score(
+        dimension_scores: List[CompetencyScoreItem],
+        transcript: Optional[List[Dict[str, Any]]] = None
+    ) -> int:
         """
-        Calculate overall score strictly from assessed competency scores using explicit weights.
-        Score = (sum((score / 5) * weight) / sum(assessed_weights)) * 100
+        Calculates an empirical, calibrated overall score (0-100) from assessed dimension scores.
+        Applies a calibration adjustment based on candidate turn substance.
         """
-        assessed = [c for c in competency_scores if c.score is not None]
+        assessed = [c for c in dimension_scores if c.score is not None]
         if not assessed:
             return 0
 
@@ -82,9 +117,21 @@ class EvaluationService:
         if total_weight <= 0:
             total_weight = len(assessed) * 20
 
-        weighted_points = sum((c.score / 5.0) * c.weight for c in assessed)
-        overall = round((weighted_points / total_weight) * 100)
-        return max(0, min(100, overall))
+        weighted_points = sum(c.score * c.weight for c in assessed)
+        raw_overall = round(weighted_points / total_weight)
+
+        # Real-time calibration: evaluate candidate spoken volume and depth
+        if transcript:
+            candidate_turns = [
+                t for t in transcript
+                if t.get("role") not in ("interviewer", "agent") and t.get("message", "").strip()
+            ]
+            total_words = sum(len(t.get("message", "").split()) for t in candidate_turns)
+            # If the session was prematurely ended or candidate gave extremely brief answers (< 40 words total)
+            if len(candidate_turns) < 2 or total_words < 40:
+                raw_overall = min(raw_overall, 35)
+
+        return max(0, min(100, raw_overall))
 
     def evaluate_interview(self, interview: Interview) -> InterviewReport:
         """
@@ -100,37 +147,44 @@ class EvaluationService:
         with open(PROMPT_FILE, "r", encoding="utf-8") as f:
             prompt_template = f.read()
 
-        plan = interview.interview_plan or {}
-        competencies = plan.get("required_competencies", [])
         transcript_text = TranscriptService.format_transcript_as_text(interview.transcript)
+        job_title = interview.job_title or "Target Role"
+        jd_text = (interview.jd_text or "").strip()
+        if not jd_text:
+            jd_text = f"Target Role: {job_title}. Core technical and operational responsibilities for {job_title}."
 
         try:
             user_prompt = prompt_template.format(
                 candidate_name=interview.candidate_name,
-                competencies_json=json.dumps(competencies, indent=2),
-                transcript_text=transcript_text[:10000],
-                resume_text=(interview.resume_text or "")[:4000]
+                job_title=job_title,
+                jd_text=jd_text[:8000],
+                transcript_text=transcript_text[:12000],
+                resume_text=(interview.resume_text or "")[:6000]
             )
         except (KeyError, IndexError, ValueError):
             user_prompt = prompt_template
             for placeholder, val in {
                 "{candidate_name}": interview.candidate_name,
-                "{competencies_json}": json.dumps(competencies, indent=2),
-                "{transcript_text}": transcript_text[:10000],
-                "{resume_text}": (interview.resume_text or "")[:4000]
+                "{job_title}": job_title,
+                "{jd_text}": jd_text[:8000],
+                "{transcript_text}": transcript_text[:12000],
+                "{resume_text}": (interview.resume_text or "")[:6000]
             }.items():
                 user_prompt = user_prompt.replace(placeholder, val)
 
         system_prompt = (
-            "You are an objective hiring evaluator. "
-            "You must score each competency on a 0-5 scale based strictly on the transcript evidence. "
-            "Return valid JSON conforming to EvaluationReportSchema."
+            f"You are a principal talent evaluation director evaluating {interview.candidate_name} for the {job_title} role. "
+            "Score the five standard performance dimensions objectively based on transcript evidence, "
+            "and provide actionable developmental suggestions. Return valid JSON conforming to EvaluationReportSchema."
         )
 
         report_data = self.llm.generate_json(system_prompt, user_prompt, EvaluationReportSchema)
 
-        # Re-verify and enforce mathematical overall score from assessed weights
-        calculated_overall = self.calculate_weighted_overall_score(report_data.competency_scores)
+        # Calculate calibrated overall score
+        calculated_overall = self.calculate_weighted_overall_score(
+            report_data.competency_scores,
+            transcript=interview.transcript
+        )
         report_data.overall_score = calculated_overall
 
         # Create InterviewReport model

@@ -12,7 +12,7 @@
       Configure Voice Interview
     </h1>
     <p style="color: var(--text-secondary);">
-      The AI interviewer is pre-configured for the <b>Content Creator & Content Writer</b> role. Upload the candidate's resume to generate a targeted competency assessment.
+      Provide the target role, job description, and candidate resume to generate a rigorous, fully customized interview plan.
     </p>
   </div>
 
@@ -21,7 +21,7 @@
     <div class="card">
       <div class="card-header">
         <h2 class="card-title">👤 Candidate Information & Interview Settings</h2>
-        <span class="badge badge-indigo">Role: Content Creator</span>
+        <span class="badge badge-indigo">Role Setup</span>
       </div>
 
       <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem;">
@@ -32,7 +32,7 @@
 
         <div class="form-group">
           <label class="form-label" for="job_title">Target Job Title <span class="required">*</span></label>
-          <input type="text" id="job_title" name="job_title" class="form-input" value="Content Creator & Content Writer" placeholder="e.g. Content Creator & Content Writer" required>
+          <input type="text" id="job_title" name="job_title" class="form-input" placeholder="e.g. Senior Backend Engineer, Product Manager" required>
         </div>
       </div>
 
@@ -70,36 +70,66 @@
       </div>
 
       <div style="padding: 0.75rem 1rem; background: var(--bg-main); border: 1px solid var(--border-color); border-radius: var(--radius-md); font-size: 0.85rem; color: var(--text-secondary); margin-top: 0.5rem;">
-        <b>Target Position:</b> Content Creator & Content Writer • Focuses on Content Strategy, SEO & Audience Research, Brand Voice Adaptation, and Performance Analytics.
+        <b>🎯 Dynamic Role Assessment:</b> Both OpenAI and Google Gemini will analyze the exact job description, role responsibilities, and resume projects to construct specific technical questions and deep dives.
       </div>
 
-      <!-- Selected Studio Engines (Configured on Dashboard) -->
-      <div style="margin-top: 1.25rem; padding: 1rem 1.25rem; background: var(--bg-main); border: 1.5px solid var(--border-color); border-radius: var(--radius-md); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem;">
+      <!-- Studio AI Engines Selection -->
+      <div style="margin-top: 1.5rem; display: flex; flex-direction: column; gap: 1.25rem;">
+        <!-- LLM Provider Selector -->
         <div>
-          <div style="font-size: 0.725rem; font-weight: 700; text-transform: uppercase; color: var(--text-muted); margin-bottom: 0.35rem;">
-            ⚙️ Active Studio Engines (Configured on Dashboard)
-          </div>
-          <div style="display: flex; gap: 0.65rem; align-items: center; flex-wrap: wrap;">
-            <span class="badge badge-indigo" style="font-size: 0.85rem; padding: 0.35rem 0.75rem;">
-              🧠 Assessment: 
-              {% if preferred_llm == 'openai' %}OpenAI (GPT-4o Mini)
-              {% elif preferred_llm == 'claude' %}Claude (Claude 3.5 Sonnet)
-              {% elif preferred_llm == 'mock' %}Simulated Mock
-              {% else %}Google Gemini (Gemini 3.8 Flash){% endif %}
-            </span>
-            <span class="badge badge-emerald" style="font-size: 0.85rem; padding: 0.35rem 0.75rem;">
-              🎙️ Voice: 
-              {% if preferred_voice == 'elevenlabs' %}ElevenLabs Conversational AI
-              {% elif preferred_voice == 'openai_realtime' %}OpenAI Realtime Voice (WebRTC)
-              {% else %}Gemini Flash Live Voice{% endif %}
-            </span>
+          <label class="form-label" style="font-weight: 600; margin-bottom: 0.5rem; display: block;">
+            🧠 AI Planning & Evaluation Model
+          </label>
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0.75rem;">
+            <label class="model-card" style="display: flex; align-items: center; gap: 0.75rem; padding: 0.85rem 1rem; border: 1.5px solid {% if preferred_llm == 'gemini' or not preferred_llm %}var(--primary){% else %}var(--border-color){% endif %}; border-radius: var(--radius-md); cursor: pointer; background: white;">
+              <input type="radio" name="llm_provider" value="gemini" {% if preferred_llm == 'gemini' or not preferred_llm %}checked{% endif %} style="accent-color: var(--primary);">
+              <div>
+                <div style="font-weight: 600; font-size: 0.9rem; color: var(--text-main);">Google Gemini</div>
+                <div style="font-size: 0.75rem; color: var(--text-muted);">Gemini 3.8 Flash (High Context)</div>
+              </div>
+            </label>
+
+            <label class="model-card" style="display: flex; align-items: center; gap: 0.75rem; padding: 0.85rem 1rem; border: 1.5px solid {% if preferred_llm == 'openai' %}var(--primary){% else %}var(--border-color){% endif %}; border-radius: var(--radius-md); cursor: pointer; background: white;">
+              <input type="radio" name="llm_provider" value="openai" {% if preferred_llm == 'openai' %}checked{% endif %} style="accent-color: var(--primary);">
+              <div>
+                <div style="font-weight: 600; font-size: 0.9rem; color: var(--text-main);">OpenAI</div>
+                <div style="font-size: 0.75rem; color: var(--text-muted);">GPT-4o Mini (Structured)</div>
+              </div>
+            </label>
           </div>
         </div>
-        <a href="{{ url_for('dashboard.index') }}" style="font-size: 0.825rem; color: var(--primary); text-decoration: underline; font-weight: 600;">
-          Change on Dashboard ↗
-        </a>
-        <input type="hidden" name="llm_provider" value="{{ preferred_llm }}">
-        <input type="hidden" name="voice_engine" value="{{ preferred_voice }}">
+
+        <!-- Voice Engine Selector -->
+        <div>
+          <label class="form-label" style="font-weight: 600; margin-bottom: 0.5rem; display: block;">
+            🎙️ Spoken Voice Interview Engine
+          </label>
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0.75rem;">
+            <label class="model-card" style="display: flex; align-items: center; gap: 0.75rem; padding: 0.85rem 1rem; border: 1.5px solid {% if preferred_voice == 'elevenlabs' %}var(--primary){% else %}var(--border-color){% endif %}; border-radius: var(--radius-md); cursor: pointer; background: white;">
+              <input type="radio" name="voice_engine" value="elevenlabs" {% if preferred_voice == 'elevenlabs' %}checked{% endif %} style="accent-color: var(--primary);">
+              <div>
+                <div style="font-weight: 600; font-size: 0.9rem; color: var(--text-main);">ElevenLabs AI</div>
+                <div style="font-size: 0.75rem; color: var(--text-muted);">Conversational AI Agent</div>
+              </div>
+            </label>
+
+            <label class="model-card" style="display: flex; align-items: center; gap: 0.75rem; padding: 0.85rem 1rem; border: 1.5px solid {% if preferred_voice == 'openai_realtime' %}var(--primary){% else %}var(--border-color){% endif %}; border-radius: var(--radius-md); cursor: pointer; background: white;">
+              <input type="radio" name="voice_engine" value="openai_realtime" {% if preferred_voice == 'openai_realtime' %}checked{% endif %} style="accent-color: var(--primary);">
+              <div>
+                <div style="font-weight: 600; font-size: 0.9rem; color: var(--text-main);">OpenAI Realtime</div>
+                <div style="font-size: 0.75rem; color: var(--text-muted);">Low-Latency WebRTC</div>
+              </div>
+            </label>
+
+            <label class="model-card" style="display: flex; align-items: center; gap: 0.75rem; padding: 0.85rem 1rem; border: 1.5px solid {% if preferred_voice == 'gemini_live' or not preferred_voice %}var(--primary){% else %}var(--border-color){% endif %}; border-radius: var(--radius-md); cursor: pointer; background: white;">
+              <input type="radio" name="voice_engine" value="gemini_live" {% if preferred_voice == 'gemini_live' or not preferred_voice %}checked{% endif %} style="accent-color: var(--primary);">
+              <div>
+                <div style="font-weight: 600; font-size: 0.9rem; color: var(--text-main);">Gemini Flash Live</div>
+                <div style="font-size: 0.75rem; color: var(--text-muted);">Multimodal Audio Engine</div>
+              </div>
+            </label>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -112,7 +142,7 @@
 
       <div style="margin-bottom: 0.5rem;">
         <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.85rem;">
-          Add a customized Job Description to tailor interview competencies and questions. If left blank, the built-in <b>Content Creator & Content Writer</b> job description is used by default.
+          Provide the employer's Job Description by uploading a document or pasting text below. The AI will extract key competencies, tech stacks, and company requirements to tailor questions directly to the position.
         </p>
 
         <!-- Dropzone for JD File -->

@@ -55,11 +55,11 @@
     </div>
   </div>
 
-  <!-- Competency Assessment Breakdown -->
+  <!-- Performance Dimensions Assessment Breakdown -->
   <div class="card">
     <div class="card-header">
-      <h2 class="card-title">📊 Competency Dimension Scores & Evidence</h2>
-      <span style="font-size: 0.8rem; color: var(--text-muted);">Scored on an objective 0 to 5 rubric</span>
+      <h2 class="card-title">📊 Performance Dimensions & Real-Time Assessment Rubric</h2>
+      <span style="font-size: 0.8rem; color: var(--text-muted);">Calibrated against professional industry hiring standards (0-100 scale)</span>
     </div>
 
     <div style="display: flex; flex-direction: column; gap: 1.5rem;">
@@ -70,11 +70,17 @@
               <span style="font-weight: 700; font-size: 1.05rem; color: var(--text-main);">{{ comp.name }}</span>
               <span style="font-size: 0.8rem; color: var(--text-muted); margin-left: 0.5rem;">(Weight: {{ comp.weight }}%)</span>
             </div>
-            <div>
+            <div style="display: flex; gap: 0.5rem; align-items: center;">
               {% if comp.score is not none %}
+                {% set display_score = comp.score if comp.score > 5 else (comp.score * 20)|round|int %}
                 <span class="score-pill">
-                  {{ comp.score }} / 5
+                  {{ display_score }} / 100
                 </span>
+                {% if comp.benchmark_level %}
+                  <span class="badge {% if comp.benchmark_level == 'Exceptional' %}badge-emerald{% elif comp.benchmark_level == 'Proficient' %}badge-indigo{% elif comp.benchmark_level == 'Developing' %}badge-amber{% else %}badge-red{% endif %}">
+                    {{ comp.benchmark_level }}
+                  </span>
+                {% endif %}
               {% else %}
                 <span class="badge badge-gray">Not Assessed</span>
               {% endif %}
@@ -83,8 +89,9 @@
 
           <!-- Score Progress Meter -->
           {% if comp.score is not none %}
+            {% set pct = comp.score if comp.score > 5 else (comp.score * 20)|round|int %}
             <div class="progress-bar-container" style="height: 6px; margin-bottom: 0.85rem;">
-              <div class="progress-bar-fill" style="width: {{ (comp.score / 5) * 100 }}%;"></div>
+              <div class="progress-bar-fill" style="width: {{ pct }}%;"></div>
             </div>
           {% endif %}
 
@@ -100,7 +107,7 @@
 
           {% if comp.improvement_recommendation %}
             <div style="font-size: 0.825rem; color: var(--primary-hover); font-weight: 500;">
-              💡 <b>Development Suggestion:</b> {{ comp.improvement_recommendation }}
+              💡 <b>Candidate Actionable Suggestion:</b> {{ comp.improvement_recommendation }}
             </div>
           {% endif %}
         </div>

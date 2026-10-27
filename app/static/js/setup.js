@@ -66,19 +66,25 @@ document.addEventListener("DOMContentLoaded", () => {
     setupFileInputPreview(jdInput, jdPreview, "jdDropzone");
   }
 
-  // Model selection card styling toggle
-  const modelRadios = document.querySelectorAll('input[name="llm_provider"]');
-  modelRadios.forEach(radio => {
-    radio.addEventListener("change", () => {
-      document.querySelectorAll(".model-card").forEach(card => {
-        card.style.borderColor = "var(--border-color)";
+  // Model & Voice selection card styling toggle
+  function bindRadioCardStyles(name) {
+    const radios = document.querySelectorAll(`input[name="${name}"]`);
+    radios.forEach(radio => {
+      radio.addEventListener("change", () => {
+        radios.forEach(r => {
+          const card = r.closest(".model-card");
+          if (card) card.style.borderColor = "var(--border-color)";
+        });
+        const activeCard = radio.closest(".model-card");
+        if (activeCard) {
+          activeCard.style.borderColor = "var(--primary)";
+        }
       });
-      const parentLabel = radio.closest(".model-card");
-      if (parentLabel) {
-        parentLabel.style.borderColor = "var(--primary)";
-      }
     });
-  });
+  }
+
+  bindRadioCardStyles("llm_provider");
+  bindRadioCardStyles("voice_engine");
 
   // Form submission
   form.addEventListener("submit", async (e) => {

@@ -16,20 +16,15 @@ from app.extensions import db
 api_bp = Blueprint("api", __name__, url_prefix="/api")
 
 
-DEFAULT_CONTENT_CREATOR_JOB_TITLE = "Content Creator / Content Writer"
-DEFAULT_CONTENT_CREATOR_JD = (
-    "Role: Content Creator & Content Writer. Plan, write, and edit high-impact articles, "
-    "social copy, and newsletters. Conduct audience search intent and keyword optimization. "
-    "Maintain brand voice consistency and track engagement metrics."
-)
+DEFAULT_TARGET_JOB_TITLE = "Software Engineer"
 
 
 @api_bp.route("/interviews", methods=["POST"])
 def create_interview():
-    """Create a new interview record from candidate resume and pre-configured Content Creator role."""
+    """Create a new interview record from candidate resume and target role/job description."""
     candidate_name = request.form.get("candidate_name", "").strip()
     candidate_email = request.form.get("candidate_email", "").strip() or None
-    job_title = request.form.get("job_title", "").strip() or DEFAULT_CONTENT_CREATOR_JOB_TITLE
+    job_title = request.form.get("job_title", "").strip() or DEFAULT_TARGET_JOB_TITLE
     duration = int(request.form.get("duration_minutes", 15))
     difficulty = request.form.get("difficulty", "Intermediate").strip()
     language = request.form.get("language", "English").strip()
@@ -65,10 +60,10 @@ def create_interview():
     except DocumentParsingError as dpe:
         return jsonify({"error": f"Resume extraction error: {str(dpe)}"}), 422
 
-    # Job description: pre-configured Content Creator JD (or optional custom text if provided)
+    # Job description: extracted from uploaded file or pasted text, or generated baseline for the role
     jd_text_input = request.form.get("jd_text", "").strip()
     jd_file = request.files.get("jd_file")
-    jd_text = DEFAULT_CONTENT_CREATOR_JD
+    jd_text = ""
     jd_filename = None
 
     if jd_file and jd_file.filename:
@@ -83,6 +78,8 @@ def create_interview():
             return jsonify({"error": f"Job description extraction error: {str(e)}"}), 422
     elif jd_text_input:
         jd_text = jd_text_input
+    else:
+        jd_text = f"Target Role: {job_title}. Evaluate technical and professional competencies, project execution, and problem solving required for a high-performing {job_title}."
 
     user_id = session.get("user_id")
     try:
@@ -173,8 +170,12 @@ def prepare_interview(interview_id: str):
         )
 
         plan_dict = plan_schema.model_dump()
+        new_title = (plan_dict.get("job_title") or "").strip()
+        if new_title:
+            interview.job_title = new_title
+        else:
+            plan_dict["job_title"] = interview.job_title
         interview.interview_plan = plan_dict
-        interview.job_title = plan_dict.get("job_title", interview.job_title)
         interview.status = InterviewStatus.PREPARED
         interview.error_message = None
 
@@ -280,8 +281,8 @@ def update_voice_engine(interview_id: str):
 
     data = request.get_json(silent=True) or {}
     engine = data.get("voice_engine", "").strip().lower()
-    if engine not in ("elevenlabs", "gemini_live"):
-        return jsonify({"error": "Invalid voice engine. Must be 'elevenlabs' or 'gemini_live'."}), 400
+    if engine not in ("elevenlabs", "gemini_live", "openai_realtime"):
+        return jsonify({"error": "Invalid voice engine. Must be 'elevenlabs', 'gemini_live', or 'openai_realtime'."}), 400
 
     interview.voice_engine = engine
     if isinstance(interview, MongoInterview):
@@ -399,12 +400,15 @@ def get_conversation_credentials(interview_id: str):
             return jsonify({"error": f"Failed to initialize OpenAI Realtime session: {str(e)}"}), 500
 
     # ElevenLabs engine branch
+    from app.services.elevenlabs_service import ElevenLabsService, build_interview_dynamic_variables
     service = ElevenLabsService()
     try:
+        dynamic_vars = build_interview_dynamic_variables(interview)
         credentials = service.get_conversation_credentials(
             interview_id=interview.id,
             candidate_name=interview.candidate_name,
-            job_title=interview.job_title
+            job_title=interview.job_title,
+            dynamic_variables=dynamic_vars
         )
 
         # Mark interview in progress and set started_at if not set

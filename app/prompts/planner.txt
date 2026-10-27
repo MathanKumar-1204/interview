@@ -1,57 +1,131 @@
-You are an expert technical recruiter, hiring manager, and talent assessment specialist.
-Your task is to analyze the candidate's resume for the role of Content Creator & Content Writer, then generate a comprehensive, structured interview plan for an AI Voice Interviewer.
+You are an elite executive technical recruiter, hiring architect, and talent assessment specialist.
+Your task is to analyze the candidate's resume against the target role and exact Job Description (JD), then generate a comprehensive, highly customized interview plan for an AI Voice Interviewer.
 
-Position: Content Creator & Content Writer
-Job Overview & Target Competencies:
-- Develop engaging multi-platform editorial content strategies (blogs, social assets, newsletters).
-- Conduct audience search intent and keyword optimization without sacrificing narrative craft.
-- Embody and adapt brand voice across distinct formats and audiences.
-- Track content engagement metrics (dwell time, CTR, conversions) and iterate systematically.
-- Creative problem-solving and high-quality execution under deadline constraints.
-
-Inputs:
+TARGET ROLE INFORMATION:
+- Target Job Title: {job_title}
 - Candidate Name: {candidate_name}
-- Interview Duration: {duration_minutes} minutes
+- Planned Duration: {duration_minutes} minutes
 - Difficulty Level: {difficulty}
-- Language: {language}
+- Spoken Language: {language}
 
-Candidate Resume:
+JOB DESCRIPTION (JD):
+"""
+{jd_text}
+"""
+
+CANDIDATE RESUME:
 """
 {resume_text}
 """
 
-Instructions:
-1. Analyze the candidate's resume against the Content Creator role requirements to identify demonstrated skills, past projects, and measurable achievements.
-2. Identify clear skill alignments as well as potential skill gaps or unverified areas for a Content Creator.
-3. Formulate 4 to 6 core competencies specifically tailored to this Content Creator role (e.g., Content Strategy & Editorial Planning, Audience Research & SEO, Writing Quality & Brand Voice, Content Performance & Analytics, Creative Problem Solving Under Deadlines).
-   - Assign each competency an integer weight (percentage) such that the sum of all competency weights equals exactly 100.
-   - Specify the objective, difficulty, and expected evidence for each competency.
-4. Create structured interview sections suited for a {duration_minutes}-minute conversational voice interview:
-   - Introduction: Warm professional welcome, agenda overview, duration clarification.
-   - Resume Deep-Dive: Probing into real projects and accomplishments mentioned in the candidate's resume.
-   - Competency Assessment: Targeted behavioral and technical questions covering the core Content Creator competencies.
-   - Scenario Challenge: Realistic situational problem-solving question (e.g. diagnosing high bounce rate or revising an editorial calendar under shifting priorities).
-   - Closing: Candidate questions, next steps, and professional wrap-up.
-5. Provide specific adaptive follow-up guidance for each question (e.g., how to probe if the candidate's response is too brief, generic, or off-topic).
-6. Return ONLY a single valid JSON object at the root level conforming to the InterviewPlanSchema structure:
-   - "job_title" (string): Title for the role (default to "Content Creator & Content Writer").
-   - "responsibilities" (list of strings): 3 to 5 core responsibilities.
-   - "required_competencies" (list of objects): 4 to 6 competencies, each having:
-       * "id" (string): Slug e.g. "content_strategy", "audience_seo", "writing_quality"
-       * "name" (string): Human-readable name
-       * "weight" (integer): Percentage weight, must sum to 100 across all competencies
-       * "difficulty" (string): "Beginner", "Intermediate", or "Advanced"
-       * "objective" (string): Assessment objective
-       * "expected_evidence" (string): Behaviors and tangible proof looked for
-   - "resume_skills_found" (list of strings): Demonstrable skills identified in the resume.
-   - "skill_gaps" (list of strings): Skills or competencies requiring deeper assessment.
-   - "sections" (list of objects): Interview stages (intro, resume_deep_dive, competencies, scenario, closing), each having:
-       * "section_id" (string)
-       * "title" (string)
-       * "target_duration_minutes" (integer)
-       * "questions" (list of objects): Each question having "id", "question_text", "competency_id", "expected_evidence", and "follow_up_guidance".
-   - "conduct_guidelines" (string): Guidance on tone and delivery for the AI interviewer.
+CORE PLANNING REQUIREMENTS:
+1. Deep Dual-Analysis:
+   a. Job Description Analysis: Identify the core technical stack, required tools, primary responsibilities, essential qualifications, architecture/domain challenges, and what separates an average hire from a top performer for this specific {job_title} role.
+   b. Resume Analysis: Meticulously inspect the candidate's actual projects, past employment history, studies/education, degrees/certifications, specific tools and programming languages/methodologies mentioned, and quantifiable business impact. Identify both strong skill alignments and unverified claims or skill gaps relative to the JD.
 
-Do NOT nest inside an outer wrapper like 'interview_metadata' or 'interview_plan'. Return all fields directly at the root level.
-Do NOT include markdown code block ticks (```) or conversational commentary outside the JSON.
+2. Dynamic, High-Yield Spoken Questions:
+   - Every single question must be custom-crafted for this candidate and this {job_title} role.
+   - Questions must directly reference the candidate's actual projects or tools from their resume, or specific requirements from the JD.
+   - NEVER generate generic filler questions. NEVER generate Content Writer questions unless the target job title is specifically a Content Writer.
+   - For every question, include practical "expected_evidence" and actionable "follow_up_guidance" (how to probe if the candidate is vague or uses "we" instead of "I").
 
+3. Strict JSON Output Specification:
+You MUST respond with a single, valid, raw JSON object matching the EXACT field names below (no markdown code blocks, no text before or after):
+
+{{
+  "job_title": "{job_title}",
+  "candidate_summary": "High-signal 2-3 sentence overview of candidate background and alignment to this {job_title} role.",
+  "candidate_projects": [
+    "Project Title - 1-2 sentence description including role, tech stack, and impact from resume"
+  ],
+  "candidate_studies": [
+    "Degree / Major - Institution / University (Year or Status)",
+    "Relevant Certification (Year)"
+  ],
+  "company_requirements_summary": "Concise bulleted summary of key requirements, responsibilities, and standards from the JD.",
+  "responsibilities": [
+    "Key responsibility 1 from JD",
+    "Key responsibility 2 from JD",
+    "Key responsibility 3 from JD"
+  ],
+  "required_competencies": [
+    {{
+      "id": "dimension_slug",
+      "name": "Competency Name (e.g. System Architecture)",
+      "weight": 25,
+      "difficulty": "{difficulty}",
+      "objective": "What this dimension verifies",
+      "expected_evidence": "Concrete evidence looked for in candidate answers"
+    }}
+  ],
+  "resume_skills_found": [
+    "Skill/Tool 1 verified on resume",
+    "Skill/Tool 2 verified on resume",
+    "Skill/Tool 3 verified on resume"
+  ],
+  "skill_gaps": [
+    "Gap or unverified requirement 1 relative to JD",
+    "Gap or unverified requirement 2 relative to JD"
+  ],
+  "sections": [
+    {{
+      "section_id": "intro",
+      "title": "Welcome & Background Alignment",
+      "target_duration_minutes": 2,
+      "questions": [
+        {{
+          "id": "q1",
+          "question_text": "Spoken question text referencing candidate's specific background",
+          "competency_id": "dimension_slug",
+          "expected_evidence": "What candidate should describe",
+          "follow_up_guidance": "How to probe if answer is brief or vague"
+        }}
+      ]
+    }},
+    {{
+      "section_id": "projects_deep_dive",
+      "title": "Resume & Project Deep-Dive",
+      "target_duration_minutes": 5,
+      "questions": [
+        {{
+          "id": "q2",
+          "question_text": "Detailed question probing a specific project from resume",
+          "competency_id": "dimension_slug",
+          "expected_evidence": "Evidence of individual contribution and technical depth",
+          "follow_up_guidance": "Ask about trade-offs, architecture decisions, or scale"
+        }}
+      ]
+    }},
+    {{
+      "section_id": "technical_scenarios",
+      "title": "Technical & Domain Problem Solving",
+      "target_duration_minutes": 5,
+      "questions": [
+        {{
+          "id": "q3",
+          "question_text": "Role-specific scenario question addressing core JD requirements",
+          "competency_id": "dimension_slug",
+          "expected_evidence": "Methodical reasoning, edge cases, best practices",
+          "follow_up_guidance": "Probe on failure modes or bottlenecks"
+        }}
+      ]
+    }},
+    {{
+      "section_id": "closing",
+      "title": "Candidate Questions & Wrap-Up",
+      "target_duration_minutes": 3,
+      "questions": [
+        {{
+          "id": "q4",
+          "question_text": "Do you have any questions for me regarding this role or the team?",
+          "competency_id": "dimension_slug",
+          "expected_evidence": "Thoughtful questions about team, technology, or culture",
+          "follow_up_guidance": "Provide high-level context and thank candidate"
+        }}
+      ]
+    }}
+  ],
+  "conduct_guidelines": "Maintain a discerning, professional tone. Probe for individual contribution and concrete evidence."
+}}
+
+Note: Provide 4-5 required_competencies whose weights sum to exactly 100. Provide 4-5 sections with total target_duration_minutes summing to approximately {duration_minutes}.

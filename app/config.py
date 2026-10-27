@@ -64,6 +64,7 @@ class Config:
     # ElevenLabs Conversational AI
     ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "").strip()
     ELEVENLABS_AGENT_ID = os.getenv("ELEVENLABS_AGENT_ID", "").strip()
+    ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID", "").strip()
     ELEVENLABS_AUTH_MODE = os.getenv("ELEVENLABS_AUTH_MODE", "signed_url").lower().strip()  # 'signed_url' or 'public'
     ELEVENLABS_ALLOWED_ORIGIN = os.getenv("ELEVENLABS_ALLOWED_ORIGIN", "").strip()
     ELEVENLABS_WEBHOOK_SECRET = os.getenv("ELEVENLABS_WEBHOOK_SECRET", "").strip()

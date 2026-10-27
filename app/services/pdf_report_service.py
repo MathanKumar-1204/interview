@@ -150,33 +150,41 @@ class PDFReportService:
         story.append(Paragraph(report.overall_summary, body_style))
         story.append(Spacer(1, 12))
 
-        # Competency Breakdown Table
-        story.append(Paragraph("Competency Assessment Breakdown", section_heading))
+        # Performance Dimensions Breakdown Table
+        story.append(Paragraph("Performance Dimensions & Real-Time Evaluation Rubric", section_heading))
         comp_rows = [
             [
-                Paragraph("<b>Competency</b>", bold_style),
+                Paragraph("<b>Dimension</b>", bold_style),
                 Paragraph("<b>Weight</b>", bold_style),
-                Paragraph("<b>Score</b>", bold_style),
-                Paragraph("<b>Findings & Evidence</b>", bold_style),
+                Paragraph("<b>Score / Benchmark</b>", bold_style),
+                Paragraph("<b>Findings, Evidence & Candidate Suggestions</b>", bold_style),
             ]
         ]
 
         for c in (report.competency_scores or []):
-            name = c.get("name", "Competency")
+            name = c.get("name", "Performance Dimension")
             weight = f"{c.get('weight', 20)}%"
             score_val = c.get("score")
-            score_text = f"{score_val} / 5" if score_val is not None else "Not Assessed"
+            benchmark = c.get("benchmark_level", "")
             
-            findings = f"<b>Rationale:</b> {c.get('rationale', '')}"
+            if score_val is not None:
+                display_num = score_val if score_val > 5 else round(score_val * 20)
+                score_text = f"<b>{display_num}/100</b>"
+                if benchmark:
+                    score_text += f"<br/><font color='#4338ca' size='7'>{benchmark}</font>"
+            else:
+                score_text = "Not Assessed"
+            
+            findings = f"<b>Observation:</b> {c.get('rationale', '')}"
             if c.get("supporting_quote"):
                 findings += f"<br/><font color='#475569'><i>\"{c.get('supporting_quote')}\"</i></font>"
             if c.get("improvement_recommendation"):
-                findings += f"<br/><b>Tip:</b> {c.get('improvement_recommendation')}"
+                findings += f"<br/><b>Candidate Actionable Suggestion:</b> {c.get('improvement_recommendation')}"
 
             comp_rows.append([
                 Paragraph(f"<b>{name}</b>", body_style),
                 Paragraph(weight, body_style),
-                Paragraph(f"<b>{score_text}</b>", body_style),
+                Paragraph(score_text, body_style),
                 Paragraph(findings, body_style),
             ])
 
