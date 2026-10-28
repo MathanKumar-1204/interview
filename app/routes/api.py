@@ -36,10 +36,10 @@ def create_interview():
     if llm_provider not in ("gemini", "openai", "claude", "mock"):
         llm_provider = default_llm if default_llm in ("gemini", "openai", "claude", "mock") else "gemini"
 
-    pref_voice = session.get("preferred_voice_engine", "gemini_live")
+    pref_voice = session.get("preferred_voice_engine", "sarvam")
     voice_engine = request.form.get("voice_engine", pref_voice).strip().lower()
-    if voice_engine not in ("elevenlabs", "gemini_live", "openai_realtime"):
-        voice_engine = pref_voice if pref_voice in ("elevenlabs", "gemini_live", "openai_realtime") else "gemini_live"
+    if voice_engine not in ("elevenlabs", "gemini_live", "openai_realtime", "sarvam"):
+        voice_engine = pref_voice if pref_voice in ("elevenlabs", "gemini_live", "openai_realtime", "sarvam") else "sarvam"
 
     if not candidate_name:
         return jsonify({"error": "Candidate name is required."}), 400
@@ -550,6 +550,12 @@ def sarvam_turn(interview_id: str):
         time_in_call = int(request.form.get("time_in_call_secs", 0))
 
     if not candidate_text:
+        if "audio" in request.files or "file" in request.files:
+            return jsonify({
+                "success": False,
+                "no_speech": True,
+                "message": "No speech detected in audio clip."
+            }), 200
         return jsonify({"error": "Candidate message or audio is required."}), 400
 
     try:
@@ -649,6 +655,10 @@ def end_interview(interview_id: str):
     if not interview:
         return jsonify({"error": "Interview not found."}), 404
 
+    # Do not downgrade an already completed or evaluated interview
+    if interview.status == InterviewStatus.COMPLETED or getattr(interview, "report", None) or getattr(interview, "has_report", False):
+        return jsonify({"success": True, "status": InterviewStatus.COMPLETED})
+
     data = request.get_json(silent=True) or {}
     reason = data.get("reason", "normal")
     conversation_id = data.get("conversation_id")
@@ -720,19 +730,29 @@ def finalize_interview(interview_id: str):
         interview.status = InterviewStatus.COMPLETED
         interview.error_message = None
 
+        # Build clean serialized transcript
+        raw_ts = getattr(interview, "transcript", None) or []
+        serialized_transcript = []
+        for turn in raw_ts:
+            if hasattr(turn, "to_dict"):
+                serialized_transcript.append(turn.to_dict())
+            elif isinstance(turn, dict):
+                serialized_transcript.append(turn)
+
         if isinstance(interview, MongoInterview):
             interview.report = MongoInterviewReport(report.to_dict() if hasattr(report, "to_dict") else report)
-            interview.transcript = interview.transcript or []
+            interview.transcript = serialized_transcript
             interview.status = InterviewStatus.COMPLETED
             interview.completed_at = datetime.now(timezone.utc)
             interview.save()
         else:
+            interview.status = InterviewStatus.COMPLETED
             db.session.commit()
             if Config.is_mongo_configured():
                 try:
                     m_doc = MongoInterview.find_by_id(interview.id) or MongoInterview(interview.to_dict())
                     m_doc.report = MongoInterviewReport(report.to_dict() if hasattr(report, "to_dict") else report)
-                    m_doc.transcript = interview.transcript or []
+                    m_doc.transcript = serialized_transcript
                     m_doc.status = InterviewStatus.COMPLETED
                     m_doc.completed_at = interview.completed_at
                     m_doc.save()

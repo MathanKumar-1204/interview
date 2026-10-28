@@ -241,6 +241,36 @@
     </div>
   </div>
 
+  <!-- Conversation Transcript (if already recorded) -->
+  {% if interview.transcript and (interview.transcript|length) > 0 %}
+  <div class="card" style="margin-top: 1.5rem;">
+    <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
+      <div>
+        <h2 class="card-title">📝 Recorded Conversation Transcript</h2>
+        <span style="font-size: 0.8rem; color: var(--text-muted);">{{ interview.transcript|length }} turn{{ '' if (interview.transcript|length) == 1 else 's' }} recorded</span>
+      </div>
+      {% if interview.status in ('awaiting_finalization', 'interrupted', 'in_progress') and (interview.transcript|length) >= 2 %}
+      <button type="button" id="finalizeFromPrepBtn" class="btn btn-primary btn-sm" style="box-shadow: 0 2px 8px rgba(79, 70, 229, 0.3);">
+        ⚡ Generate Evaluation Report Now
+      </button>
+      {% endif %}
+    </div>
+
+    <div style="max-height: 320px; overflow-y: auto; display: flex; flex-direction: column; gap: 0.75rem; padding: 0.5rem 0;">
+      {% for turn in interview.transcript %}
+        <div style="padding: 0.75rem 1rem; border-radius: var(--radius-md); background: {% if turn.role in ('candidate', 'user') %}#f0fdf4; border: 1px solid #bbf7d0; align-self: flex-end; margin-left: 2rem;{% else %}#f8fafc; border: 1px solid var(--border-color); align-self: flex-start; margin-right: 2rem;{% endif %}; max-width: 85%;">
+          <div style="font-size: 0.75rem; font-weight: 700; color: {% if turn.role in ('candidate', 'user') %}#16a34a{% else %}#4f46e5{% endif %}; margin-bottom: 0.25rem;">
+            {{ 'Candidate (' ~ interview.candidate_name ~ ')' if turn.role in ('candidate', 'user') else 'Alex (AI Interviewer)' }}
+          </div>
+          <div style="font-size: 0.875rem; color: var(--text-main); line-height: 1.45;">
+            {{ turn.message }}
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
   <!-- Live Voice Interview Engine Selector Card -->
   <div class="card" style="margin-top: 1.5rem; background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%); border: 1.5px solid var(--border-color);">
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.5rem;">

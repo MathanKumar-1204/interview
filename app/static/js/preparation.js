@@ -5,6 +5,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const updateTitleBtn = document.getElementById("updateTitleBtn");
   const editJobTitle = document.getElementById("editJobTitle");
   const retryPlanBtn = document.getElementById("retryPlanBtn");
+  const finalizeFromPrepBtn = document.getElementById("finalizeFromPrepBtn");
   const voiceEngineRadios = document.querySelectorAll('input[name="voice_engine_select"]');
   const savingBadge = document.getElementById("voiceEngineSavingBadge");
 
@@ -104,6 +105,37 @@ document.addEventListener("DOMContentLoaded", () => {
         alert("Error updating title: " + err.message);
         updateTitleBtn.disabled = false;
         updateTitleBtn.textContent = "Save Title Change";
+      }
+    });
+  }
+
+  if (finalizeFromPrepBtn) {
+    finalizeFromPrepBtn.addEventListener("click", async () => {
+      finalizeFromPrepBtn.disabled = true;
+      finalizeFromPrepBtn.textContent = "Synthesizing Evaluation Report...";
+
+      try {
+        const response = await fetch(`/api/interviews/${interviewId}/finalize`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Accept": "application/json"
+          },
+          body: JSON.stringify({})
+        });
+
+        const data = await response.json();
+        if (response.ok && data.success) {
+          window.location.href = data.report_url || `/reports/${interviewId}`;
+        } else {
+          alert(data.error || "Failed to finalize evaluation.");
+          finalizeFromPrepBtn.disabled = false;
+          finalizeFromPrepBtn.textContent = "⚡ Generate Evaluation Report Now";
+        }
+      } catch (err) {
+        alert("Evaluation request failed: " + err.message);
+        finalizeFromPrepBtn.disabled = false;
+        finalizeFromPrepBtn.textContent = "⚡ Generate Evaluation Report Now";
       }
     });
   }

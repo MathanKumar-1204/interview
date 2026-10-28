@@ -77,6 +77,10 @@
         <div class="config-banner" style="display: inline-flex; margin: 0 auto;">
           <span>⚠️ <b>OpenAI Realtime Configuration Required:</b> Set <code>OPENAI_API_KEY</code> in <code>.env</code> to enable OpenAI Realtime WebRTC voice assessment.</span>
         </div>
+      {% elif voice_engine == 'sarvam' and not sarvam_ready %}
+        <div class="config-banner" style="display: inline-flex; margin: 0 auto;">
+          <span>⚠️ <b>Sarvam AI Configuration Required:</b> Set <code>SARVAM_API_KEY</code> in <code>.env</code> to enable Sarvam AI Voice assessment.</span>
+        </div>
       {% else %}
         <div id="audioStatusPill" style="font-size: 0.875rem; font-weight: 500; color: var(--text-secondary); display: inline-flex; align-items: center; gap: 0.6rem; padding: 0.4rem 1rem; background: var(--bg-muted); border-radius: var(--radius-full); border: 1px solid var(--border-color);">
           <span id="audioStatusDot" style="width: 10px; height: 10px; border-radius: 50%; background-color: #94a3b8; display: inline-block;"></span>
@@ -135,10 +139,10 @@
     </div>
 
     <!-- Live Controls -->
-    {% set is_configured = (elevenlabs_ready if voice_engine == 'elevenlabs' else openai_realtime_ready if voice_engine == 'openai_realtime' else gemini_live_ready) %}
+    {% set is_configured = (sarvam_ready if voice_engine == 'sarvam' else elevenlabs_ready if voice_engine == 'elevenlabs' else openai_realtime_ready if voice_engine == 'openai_realtime' else gemini_live_ready) %}
     <div style="display: flex; justify-content: center; gap: 1rem; align-items: center; flex-wrap: wrap;">
       <button id="startInterviewBtn" class="btn btn-primary btn-lg" {% if not is_configured %}disabled{% endif %}>
-        ▶️ Start Interview Call ({% if voice_engine == 'gemini_live' %}Gemini Flash Live{% elif voice_engine == 'openai_realtime' %}OpenAI Realtime WebRTC{% else %}ElevenLabs AI{% endif %})
+        ▶️ Start Interview Call ({% if voice_engine == 'gemini_live' %}Gemini Flash Live{% elif voice_engine == 'openai_realtime' %}OpenAI Realtime WebRTC{% elif voice_engine == 'sarvam' %}Sarvam AI Voice{% else %}ElevenLabs AI{% endif %})
       </button>
 
       <button id="endInterviewBtn" class="btn btn-danger btn-lg" style="display: none;">

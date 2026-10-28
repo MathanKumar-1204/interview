@@ -92,10 +92,10 @@ class TranscriptService:
                 candidate_turns += 1
                 candidate_words += len(msg.split())
 
-        if candidate_turns == 0 or candidate_words < 10:
+        if candidate_turns == 0 or candidate_words < 2:
             raise TranscriptValidationError(
                 "Insufficient candidate responses recorded in the transcript. "
-                f"Recorded only {candidate_words} words from the candidate."
+                "The candidate must provide at least one response to generate an evaluation."
             )
 
     @staticmethod

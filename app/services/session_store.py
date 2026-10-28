@@ -20,6 +20,8 @@ def get_or_restore_interview(interview_id: str) -> Optional[Any]:
         try:
             mongo_doc = MongoInterview.find_by_id(interview_id)
             if mongo_doc:
+                if mongo_doc.report and mongo_doc.status != InterviewStatus.COMPLETED:
+                    mongo_doc.status = InterviewStatus.COMPLETED
                 return mongo_doc
         except Exception as e:
             print(f"[SessionStore] Mongo lookup error: {e}")
@@ -27,6 +29,12 @@ def get_or_restore_interview(interview_id: str) -> Optional[Any]:
     # 2. Secondary: Check SQLAlchemy (SQLite / Postgres)
     interview = db.session.get(Interview, interview_id)
     if interview:
+        if interview.report and interview.status != InterviewStatus.COMPLETED:
+            interview.status = InterviewStatus.COMPLETED
+            try:
+                db.session.commit()
+            except Exception:
+                db.session.rollback()
         return interview
 
     # 3. Fallback: Restore from signed cookie session
@@ -76,6 +84,18 @@ def get_or_restore_report(interview_id: str) -> Tuple[Optional[Any], Optional[An
         return None, None
 
     if interview.report:
+        if interview.status != InterviewStatus.COMPLETED:
+            interview.status = InterviewStatus.COMPLETED
+            if isinstance(interview, MongoInterview):
+                try:
+                    interview.save()
+                except Exception:
+                    pass
+            else:
+                try:
+                    db.session.commit()
+                except Exception:
+                    pass
         return interview, interview.report
 
     cached_rep = session.get("active_report")

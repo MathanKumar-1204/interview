@@ -86,7 +86,9 @@ class Config:
     
     # Sarvam AI Voice Configuration
     SARVAM_API_KEY = os.getenv("SARVAM_API_KEY", "").strip()
-    SARVAM_SPEAKER = os.getenv("SARVAM_SPEAKER", "meera").strip()
+    SARVAM_VOICE_ID = os.getenv("SARVAM_VOICE_ID", "01a0e8fc-9123-73bb-bd4e-04df4741957a").strip()
+    SARVAM_AGENT_ID = os.getenv("SARVAM_AGENT_ID", "interview-02c7fae8-dbd6").strip()
+    SARVAM_SPEAKER = os.getenv("SARVAM_SPEAKER", "aditya").strip()
     SARVAM_TTS_MODEL = os.getenv("SARVAM_TTS_MODEL", "bulbul:v3").strip()
     SARVAM_LANGUAGE_CODE = os.getenv("SARVAM_LANGUAGE_CODE", "en-IN").strip()
     SARVAM_STT_MODEL = os.getenv("SARVAM_STT_MODEL", "saaras:v4").strip()

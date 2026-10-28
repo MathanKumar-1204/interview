@@ -41,6 +41,8 @@ class SarvamService:
     def __init__(
         self,
         api_key: Optional[str] = None,
+        voice_id: Optional[str] = None,
+        agent_id: Optional[str] = None,
         speaker: Optional[str] = None,
         tts_model: Optional[str] = None,
         stt_model: Optional[str] = None,
@@ -48,13 +50,17 @@ class SarvamService:
         llm_service: Optional[LLMService] = None
     ):
         cfg_key = current_app.config.get("SARVAM_API_KEY") if has_app_context() else Config.SARVAM_API_KEY
+        cfg_voice_id = current_app.config.get("SARVAM_VOICE_ID") if has_app_context() else getattr(Config, "SARVAM_VOICE_ID", "01a0e8fc-9123-73bb-bd4e-04df4741957a")
+        cfg_agent_id = current_app.config.get("SARVAM_AGENT_ID") if has_app_context() else getattr(Config, "SARVAM_AGENT_ID", "interview-02c7fae8-dbd6")
         cfg_speaker = current_app.config.get("SARVAM_SPEAKER") if has_app_context() else Config.SARVAM_SPEAKER
         cfg_tts_model = current_app.config.get("SARVAM_TTS_MODEL") if has_app_context() else Config.SARVAM_TTS_MODEL
         cfg_stt_model = current_app.config.get("SARVAM_STT_MODEL") if has_app_context() else Config.SARVAM_STT_MODEL
         cfg_lang = current_app.config.get("SARVAM_LANGUAGE_CODE") if has_app_context() else Config.SARVAM_LANGUAGE_CODE
 
         self.api_key = api_key if api_key is not None else cfg_key
-        self.speaker = speaker or cfg_speaker or "meera"
+        self.voice_id = voice_id or cfg_voice_id or "01a0e8fc-9123-73bb-bd4e-04df4741957a"
+        self.agent_id = agent_id or cfg_agent_id or "interview-02c7fae8-dbd6"
+        self.speaker = speaker or cfg_speaker or "aditya"
         self.tts_model = tts_model or cfg_tts_model or "bulbul:v3"
         self.stt_model = stt_model or cfg_stt_model or "saaras:v4"
         self.language_code = language_code or cfg_lang or "en-IN"
@@ -95,18 +101,21 @@ class SarvamService:
             "text": greeting_text,
             "audio_base64": audio_b64,
             "speaker": self.speaker,
+            "voice_id": self.voice_id,
+            "agent_id": self.agent_id,
             "role": "interviewer"
         }
 
     def synthesize_speech(
         self,
         text: str,
+        voice_id: Optional[str] = None,
         speaker: Optional[str] = None,
         language_code: Optional[str] = None
     ) -> str:
         """
         Call Sarvam AI Text-to-Speech REST API (Bulbul).
-        Returns base64 encoded audio string (MP3 format).
+        Uses specified voice_id or speaker, returns base64 encoded audio string (MP3 format).
         """
         if not self.is_configured():
             raise SarvamConfigError("SARVAM_API_KEY is not configured in .env file.")
@@ -120,15 +129,23 @@ class SarvamService:
             "api-subscription-key": self.api_key,
             "Content-Type": "application/json"
         }
+        if self.agent_id:
+            headers["x-agent-id"] = self.agent_id
+
         payload = {
             "text": clean_text[:2000],
             "language_code": language_code or self.language_code,
-            "speaker": speaker or self.speaker,
             "model": self.tts_model,
             "speech_sample_rate": 22050,
             "pace": 1.0,
             "output_audio_codec": "mp3"
         }
+
+        target_voice = voice_id or self.voice_id
+        if target_voice:
+            payload["voice_id"] = target_voice
+        if speaker or self.speaker:
+            payload["speaker"] = speaker or self.speaker
 
         try:
             resp = requests.post(url, headers=headers, json=payload, timeout=20)
@@ -165,8 +182,9 @@ class SarvamService:
         headers = {
             "api-subscription-key": self.api_key
         }
+        mime_type = "audio/webm" if filename.lower().endswith(".webm") else "audio/mp4" if filename.lower().endswith(".mp4") else "audio/wav"
         files = {
-            "file": (filename, audio_bytes, "audio/wav")
+            "file": (filename, audio_bytes, mime_type)
         }
         data = {
             "model": self.stt_model,

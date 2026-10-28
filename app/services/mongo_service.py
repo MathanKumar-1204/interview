@@ -217,6 +217,8 @@ class MongoInterview:
         # Embedded Report
         rep_data = d.get("report")
         self.report = MongoInterviewReport(rep_data) if rep_data else None
+        if self.report and self.status in ("awaiting_finalization", "draft", "in_progress"):
+            self.status = "completed"
 
     def to_mongo_doc(self) -> Dict[str, Any]:
         return {
@@ -281,6 +283,8 @@ class MongoInterview:
         db = get_mongo_db()
         if db is None:
             return
+        if self.report and self.status in ("awaiting_finalization", "draft", "in_progress"):
+            self.status = "completed"
         self.updated_at = datetime.now(timezone.utc)
         doc = self.to_mongo_doc()
         db.interviews.update_one({"_id": self.id}, {"$set": doc}, upsert=True)

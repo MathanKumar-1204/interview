@@ -15,7 +15,8 @@ def new_interview():
     elevenlabs_ready = Config.is_elevenlabs_configured()
     llm_ready = Config.is_llm_configured()
     preferred_llm = session.get("preferred_llm_provider", Config.LLM_PROVIDER or "gemini")
-    preferred_voice = session.get("preferred_voice_engine", "gemini_live")
+    default_voice = "sarvam" if Config.is_sarvam_configured() else "gemini_live"
+    preferred_voice = session.get("preferred_voice_engine", default_voice)
 
     return render_template(
         "interview_setup.html",
@@ -39,7 +40,7 @@ def view_preparation(interview_id: str):
     if not interview:
         abort(404, description="Interview not found.")
 
-    if interview.status == InterviewStatus.COMPLETED and interview.report:
+    if interview.status == InterviewStatus.COMPLETED or interview.report or getattr(interview, "has_report", False):
         return redirect(url_for("reports.view_report", interview_id=interview.id))
 
     return render_template(
@@ -65,7 +66,7 @@ def live_interview(interview_id: str):
         abort(404, description="Interview not found.")
 
     # Redirect completed interviews to report
-    if interview.status == InterviewStatus.COMPLETED and interview.report:
+    if interview.status == InterviewStatus.COMPLETED or interview.report or getattr(interview, "has_report", False):
         return redirect(url_for("reports.view_report", interview_id=interview.id))
 
     elevenlabs_ready = Config.is_elevenlabs_configured()

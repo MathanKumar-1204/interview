@@ -30,7 +30,7 @@ def index():
     
     # Calculate quick dashboard stats
     total_count = len(interviews)
-    completed_count = sum(1 for i in interviews if i.status == InterviewStatus.COMPLETED)
+    completed_count = sum(1 for i in interviews if i.status == InterviewStatus.COMPLETED or i.report or getattr(i, "has_report", False))
     in_progress_count = sum(1 for i in interviews if i.status == InterviewStatus.IN_PROGRESS)
     
     scores = [
@@ -43,7 +43,8 @@ def index():
     elevenlabs_ready = Config.is_elevenlabs_configured()
     llm_ready = Config.is_llm_configured()
     preferred_llm = session.get("preferred_llm_provider", Config.LLM_PROVIDER or "gemini")
-    preferred_voice = session.get("preferred_voice_engine", "gemini_live")
+    default_voice = "sarvam" if Config.is_sarvam_configured() else "gemini_live"
+    preferred_voice = session.get("preferred_voice_engine", default_voice)
 
     return render_template(
         "dashboard.html",
