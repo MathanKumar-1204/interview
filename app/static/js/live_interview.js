@@ -141,12 +141,16 @@ document.addEventListener("DOMContentLoaded", () => {
       ? isGeminiLiveConfigured 
       : (voiceEngine === "openai_realtime")
         ? isOpenaiRealtimeConfigured
-        : isElevenLabsConfigured;
+        : (voiceEngine === "sarvam")
+          ? isSarvamConfigured
+          : isElevenLabsConfigured;
     const defaultMsg = voiceEngine === "gemini_live" 
       ? "▶️ Start Interview Call (Gemini Flash Live)" 
       : voiceEngine === "openai_realtime"
         ? "▶️ Start Interview Call (OpenAI Realtime WebRTC)"
-        : "▶️ Start Interview Call (ElevenLabs AI)";
+        : (voiceEngine === "sarvam")
+          ? "▶️ Start Interview Call (Sarvam AI Voice)"
+          : "▶️ Start Interview Call (ElevenLabs AI)";
     if (startBtn) {
       startBtn.disabled = !isConfigured;
       startBtn.style.display = "inline-flex";
@@ -433,7 +437,11 @@ document.addEventListener("DOMContentLoaded", () => {
       if (currentSpokenCandidateText && isCallActive && !isWaitingForAiReply) {
         const toSend = currentSpokenCandidateText;
         currentSpokenCandidateText = "";
-        sendCandidateTurnToGemini(toSend);
+        if (voiceEngine === "sarvam") {
+          sendCandidateTurnToSarvam(toSend);
+        } else {
+          sendCandidateTurnToGemini(toSend);
+        }
       }
     });
   }
@@ -444,7 +452,11 @@ document.addEventListener("DOMContentLoaded", () => {
       const text = voiceFallbackTextInput.value.trim();
       if (text && isCallActive && !isWaitingForAiReply) {
         voiceFallbackTextInput.value = "";
-        sendCandidateTurnToGemini(text);
+        if (voiceEngine === "sarvam") {
+          sendCandidateTurnToSarvam(text);
+        } else {
+          sendCandidateTurnToGemini(text);
+        }
       }
     };
     voiceFallbackSendBtn.addEventListener("click", submitFallback);
@@ -530,6 +542,208 @@ document.addEventListener("DOMContentLoaded", () => {
       appendTranscriptTurn("interviewer", fallbackMsg);
       speakGeminiTurn(fallbackMsg, () => {
         isWaitingForAiReply = false;
+        startGeminiRecognition();
+      });
+    }
+  }
+
+  // =========================================================================
+  // SARVAM AI VOICE ENGINE IMPLEMENTATION
+  // =========================================================================
+  let currentSarvamAudio = null;
+
+  function stopSarvamAudio() {
+    if (currentSarvamAudio) {
+      try {
+        currentSarvamAudio.pause();
+        currentSarvamAudio.currentTime = 0;
+      } catch (_) {}
+      currentSarvamAudio = null;
+    }
+  }
+
+  function playSarvamAudioB64(audioB64, onComplete) {
+    stopSarvamAudio();
+    if (!audioB64) {
+      if (onComplete) onComplete();
+      return;
+    }
+
+    try {
+      const audio = new Audio("data:audio/mp3;base64," + audioB64);
+      currentSarvamAudio = audio;
+
+      let hasEnded = false;
+      const finish = () => {
+        if (hasEnded) return;
+        hasEnded = true;
+        currentSarvamAudio = null;
+        if (onComplete) onComplete();
+      };
+
+      audio.onended = finish;
+      audio.onerror = (e) => {
+        console.warn("Sarvam audio playback error:", e);
+        finish();
+      };
+
+      const playPromise = audio.play();
+      if (playPromise !== undefined) {
+        playPromise.catch(err => {
+          console.warn("Audio autoplay blocked or failed:", err);
+          finish();
+        });
+      }
+    } catch (e) {
+      console.error("Failed to play Sarvam audio:", e);
+      if (onComplete) onComplete();
+    }
+  }
+
+  function speakSarvamTurn(text, audioB64, onComplete) {
+    const cleanSpeech = extractCleanSpokenText(text);
+    if (!cleanSpeech) {
+      if (onComplete) onComplete();
+      return;
+    }
+
+    isAlexSpeaking = true;
+    stopGeminiRecognition();
+
+    if (voiceOrb) voiceOrb.className = "pulsing-orb speaking";
+    if (orbIcon) orbIcon.textContent = "🎙️";
+    if (connectionBadge) {
+      connectionBadge.className = "badge badge-indigo";
+      connectionBadge.textContent = "Alex is Speaking";
+    }
+    updateAudioStatus("Alex is speaking aloud (Sarvam Bulbul)...", "#6366f1");
+
+    if (liveMonitorStateText) liveMonitorStateText.textContent = "🔊 Alex is speaking (Sarvam Bulbul)...";
+    if (liveMonitorDot) liveMonitorDot.style.background = "#6366f1";
+    if (liveTranscriptDisplay) liveTranscriptDisplay.innerHTML = '<span style="color: var(--text-muted); font-style: italic;">(Alex is speaking...)</span>';
+    if (doneSpeakingBtn) doneSpeakingBtn.style.display = "none";
+    if (livePauseIndicator) livePauseIndicator.style.display = "none";
+
+    const afterSpeech = () => {
+      isAlexSpeaking = false;
+      if (!isCallActive) return;
+
+      if (voiceOrb) voiceOrb.className = "pulsing-orb listening";
+      if (orbIcon) orbIcon.textContent = "🗣️";
+      if (connectionBadge) {
+        connectionBadge.className = "badge badge-emerald";
+        connectionBadge.textContent = "Listening to You";
+      }
+      updateAudioStatus("Listening • Speak into your microphone...", "#10b981");
+
+      if (liveMonitorStateText) liveMonitorStateText.textContent = "🎙️ Listening to you... Speak into your microphone";
+      if (liveMonitorDot) liveMonitorDot.style.background = "#10b981";
+      if (liveTranscriptDisplay) liveTranscriptDisplay.innerHTML = '<span style="color: var(--text-muted); font-style: italic;">(Alex is listening... Speak your answer now)</span>';
+      currentSpokenCandidateText = "";
+
+      if (onComplete) onComplete();
+    };
+
+    if (audioB64) {
+      playSarvamAudioB64(audioB64, afterSpeech);
+    } else {
+      if (window.speechSynthesis) {
+        const utter = new SpeechSynthesisUtterance(cleanSpeech);
+        utter.onend = afterSpeech;
+        utter.onerror = afterSpeech;
+        window.speechSynthesis.speak(utter);
+      } else {
+        setTimeout(afterSpeech, 2500);
+      }
+    }
+  }
+
+  function startSarvamVoiceSession(creds) {
+    isCallActive = true;
+    startBtn.style.display = "none";
+    if (endBtn) {
+      endBtn.style.display = "inline-flex";
+    }
+    if (liveVoiceMonitor) {
+      liveVoiceMonitor.style.display = "block";
+    }
+
+    if (studioStateTitle) {
+      studioStateTitle.textContent = "Interview in Progress (Sarvam AI Voice)";
+    }
+    if (studioStateSubtitle) {
+      studioStateSubtitle.textContent =
+        "Alex is conducting your spoken interview powered by Sarvam AI. Speak naturally into your microphone.";
+    }
+
+    startTimer();
+
+    const greetingText = creds.text || `Hello ${candidateName}! Welcome to your interview for the ${jobTitle} position. I am Alex, your interviewer today. To get started, could you please explain a bit about yourself and walk me through your CV?`;
+    const greetingAudio = creds.audio_base64 || null;
+
+    appendTranscriptTurn("interviewer", greetingText);
+
+    speakSarvamTurn(greetingText, greetingAudio, () => {
+      startGeminiRecognition();
+    });
+  }
+
+  async function sendCandidateTurnToSarvam(candidateMessage) {
+    if (!candidateMessage || !candidateMessage.trim() || isWaitingForAiReply) return;
+
+    isWaitingForAiReply = true;
+    stopGeminiRecognition();
+    stopSarvamAudio();
+
+    appendTranscriptTurn("candidate", candidateMessage.trim());
+
+    if (voiceOrb) voiceOrb.className = "pulsing-orb thinking";
+    if (orbIcon) orbIcon.textContent = "🧠";
+    if (connectionBadge) {
+      connectionBadge.className = "badge badge-amber";
+      connectionBadge.textContent = "Alex is Thinking...";
+    }
+    updateAudioStatus("Alex is formulating response...", "#f59e0b");
+
+    if (liveMonitorStateText) liveMonitorStateText.textContent = "🧠 Alex is formulating response...";
+    if (liveMonitorDot) liveMonitorDot.style.background = "#f59e0b";
+    if (liveTranscriptDisplay) {
+      liveTranscriptDisplay.innerHTML = `<span style="color: #4f46e5; font-weight: 600;">✓ Sent: "${escapeHtml(candidateMessage.trim())}"</span>`;
+    }
+    if (doneSpeakingBtn) doneSpeakingBtn.style.display = "none";
+    if (livePauseIndicator) livePauseIndicator.style.display = "none";
+
+    try {
+      const res = await fetch(`/api/interviews/${interviewId}/sarvam/turn`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Accept": "application/json" },
+        body: JSON.stringify({
+          candidate_message: candidateMessage.trim(),
+          time_in_call_secs: elapsedSeconds
+        })
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "Sarvam turn failed.");
+      }
+
+      const alexText = data.response_text;
+      const audioB64 = data.audio_base64;
+
+      appendTranscriptTurn("interviewer", alexText);
+
+      isWaitingForAiReply = false;
+      speakSarvamTurn(alexText, audioB64, () => {
+        startGeminiRecognition();
+      });
+
+    } catch (err) {
+      console.error("Sarvam turn error:", err);
+      isWaitingForAiReply = false;
+      const fallbackMsg = "Got it. Can you walk me through your personal contribution to that project?";
+      appendTranscriptTurn("interviewer", fallbackMsg);
+      speakSarvamTurn(fallbackMsg, null, () => {
         startGeminiRecognition();
       });
     }
@@ -667,13 +881,17 @@ document.addEventListener("DOMContentLoaded", () => {
         ? isGeminiLiveConfigured 
         : (voiceEngine === "openai_realtime")
           ? isOpenaiRealtimeConfigured
-          : isElevenLabsConfigured;
+          : (voiceEngine === "sarvam")
+            ? isSarvamConfigured
+            : isElevenLabsConfigured;
       if (!isConfigured) {
         const engineName = (voiceEngine === "gemini_live") 
           ? "Gemini API Key" 
           : (voiceEngine === "openai_realtime")
             ? "OpenAI API Key"
-            : "ElevenLabs API Key & Agent ID";
+            : (voiceEngine === "sarvam")
+              ? "Sarvam API Key"
+              : "ElevenLabs API Key & Agent ID";
         alert(`${engineName} is not configured in your .env file.`);
         return;
       }
@@ -912,6 +1130,12 @@ document.addEventListener("DOMContentLoaded", () => {
           return;
         }
 
+        // BRANCH: SARVAM AI VOICE ENGINE
+        if (voiceEngine === "sarvam" || creds.voice_engine === "sarvam") {
+          startSarvamVoiceSession(creds);
+          return;
+        }
+
         // BRANCH: ELEVENLABS CONVERSATIONAL AI ENGINE
         updateAudioStatus("Connecting audio stream...", "#f59e0b");
         if (connectionBadge) {
@@ -1059,6 +1283,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (window.speechSynthesis) {
       window.speechSynthesis.cancel();
     }
+    stopSarvamAudio();
     stopGeminiRecognition();
     cleanupOpenAIRealtime();
 

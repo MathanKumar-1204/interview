@@ -182,7 +182,7 @@ class MongoInterview:
         self.user_id = d.get("user_id")
         self.candidate_name = d.get("candidate_name", "")
         self.candidate_email = d.get("candidate_email")
-        self.job_title = d.get("job_title", "Content Creator / Content Writer")
+        self.job_title = d.get("job_title", "") or "Target Role"
         self.jd_text = d.get("jd_text", "")
         self.resume_text = d.get("resume_text", "")
         self.jd_filename = d.get("jd_filename")

@@ -9,12 +9,8 @@ from app.services.mongo_service import MongoInterview, MongoInterviewReport, get
 from app.config import Config
 from app.extensions import db
 
-DEFAULT_CONTENT_CREATOR_JOB_TITLE = "Content Creator / Content Writer"
-DEFAULT_CONTENT_CREATOR_JD = (
-    "Role: Content Creator & Content Writer. Plan, write, and edit high-impact articles, "
-    "social copy, and newsletters. Conduct audience search intent and keyword optimization. "
-    "Maintain brand voice consistency and track engagement metrics."
-)
+DEFAULT_JOB_TITLE = "Target Role"
+DEFAULT_JD = "Evaluate role-specific technical competencies, project execution, and problem-solving abilities."
 
 
 def get_or_restore_interview(interview_id: str) -> Optional[Any]:
@@ -42,8 +38,8 @@ def get_or_restore_interview(interview_id: str) -> Optional[Any]:
                 user_id=cached.get("user_id") or session.get("user_id"),
                 candidate_name=cached.get("candidate_name", "Candidate"),
                 candidate_email=cached.get("candidate_email"),
-                job_title=cached.get("job_title", DEFAULT_CONTENT_CREATOR_JOB_TITLE),
-                jd_text=cached.get("jd_text") or DEFAULT_CONTENT_CREATOR_JD,
+                job_title=cached.get("job_title", DEFAULT_JOB_TITLE),
+                jd_text=cached.get("jd_text") or DEFAULT_JD,
                 resume_text=cached.get("resume_text", ""),
                 duration_minutes=int(cached.get("duration_minutes", 15)),
                 difficulty=cached.get("difficulty", "Intermediate"),

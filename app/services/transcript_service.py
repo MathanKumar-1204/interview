@@ -52,7 +52,23 @@ class TranscriptService:
         elif not interview.transcript:
             interview.transcript = []
 
-        db.session.commit()
+        try:
+            from app.services.mongo_service import MongoInterview
+            from app.config import Config
+            if isinstance(interview, MongoInterview):
+                interview.save()
+            else:
+                db.session.commit()
+                if Config.is_mongo_configured():
+                    m_doc = MongoInterview.find_by_id(interview.id) or MongoInterview(interview.to_dict())
+                    m_doc.transcript = interview.transcript
+                    if conv_id:
+                        m_doc.elevenlabs_conversation_id = conv_id
+                    m_doc.save()
+        except Exception as me:
+            print(f"[TranscriptService] Mongo sync warning: {me}")
+            db.session.commit()
+
         return interview.transcript or []
 
     @staticmethod

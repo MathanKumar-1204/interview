@@ -281,8 +281,8 @@ def update_voice_engine(interview_id: str):
 
     data = request.get_json(silent=True) or {}
     engine = data.get("voice_engine", "").strip().lower()
-    if engine not in ("elevenlabs", "gemini_live", "openai_realtime"):
-        return jsonify({"error": "Invalid voice engine. Must be 'elevenlabs', 'gemini_live', or 'openai_realtime'."}), 400
+    if engine not in ("elevenlabs", "gemini_live", "openai_realtime", "sarvam"):
+        return jsonify({"error": "Invalid voice engine. Must be 'elevenlabs', 'gemini_live', 'openai_realtime', or 'sarvam'."}), 400
 
     interview.voice_engine = engine
     if isinstance(interview, MongoInterview):
@@ -314,7 +314,7 @@ def update_user_preferences():
 
     if llm in ("gemini", "openai", "claude", "mock"):
         session["preferred_llm_provider"] = llm
-    if voice in ("gemini_live", "elevenlabs", "openai_realtime"):
+    if voice in ("gemini_live", "elevenlabs", "openai_realtime", "sarvam"):
         session["preferred_voice_engine"] = voice
     session.modified = True
 
@@ -399,6 +399,44 @@ def get_conversation_credentials(interview_id: str):
         except Exception as e:
             return jsonify({"error": f"Failed to initialize OpenAI Realtime session: {str(e)}"}), 500
 
+    # Sarvam AI Voice engine branch
+    if interview.voice_engine == "sarvam":
+        if not Config.is_sarvam_configured():
+            return jsonify({
+                "error": "Sarvam AI Voice is not configured. Please ensure SARVAM_API_KEY is configured in your .env file."
+            }), 503
+
+        try:
+            from app.services.sarvam_service import SarvamService
+            sarvam_svc = SarvamService(llm_service=LLMService(provider=interview.llm_provider))
+            greeting_data = sarvam_svc.get_initial_greeting(interview)
+
+            if interview.status != InterviewStatus.IN_PROGRESS:
+                interview.status = InterviewStatus.IN_PROGRESS
+                interview.started_at = datetime.now(timezone.utc)
+                if isinstance(interview, MongoInterview):
+                    interview.save()
+                else:
+                    db.session.commit()
+                    if Config.is_mongo_configured():
+                        try:
+                            m_doc = MongoInterview.find_by_id(interview.id) or MongoInterview(interview.to_dict())
+                            m_doc.status = interview.status
+                            m_doc.started_at = interview.started_at
+                            m_doc.save()
+                        except Exception:
+                            pass
+
+            return jsonify({
+                "success": True,
+                "voice_engine": "sarvam",
+                "candidate_name": interview.candidate_name,
+                "job_title": interview.job_title,
+                **greeting_data
+            })
+        except Exception as e:
+            return jsonify({"error": f"Failed to initialize Sarvam AI session: {str(e)}"}), 500
+
     # ElevenLabs engine branch
     from app.services.elevenlabs_service import ElevenLabsService, build_interview_dynamic_variables
     service = ElevenLabsService()
@@ -473,6 +511,77 @@ def openai_realtime_relay(interview_id: str):
         return jsonify({"success": True, "sdp": answer_sdp})
     except Exception as e:
         return jsonify({"error": f"SDP relay failed: {str(e)}"}), 502
+
+
+@api_bp.route("/interviews/<interview_id>/sarvam/turn", methods=["POST"])
+def sarvam_turn(interview_id: str):
+    """
+    Processes candidate spoken turn for Sarvam AI Voice Engine:
+    Accepts JSON text payload or multipart audio upload file (transcribed via Sarvam Saaras STT).
+    Generates Alex's reply using the Sarvam prompt (no parroting, natural fillers),
+    synthesizes speech audio via Sarvam Bulbul TTS, and saves the turns to MongoDB.
+    """
+    interview = get_or_restore_interview(interview_id)
+    if not interview:
+        return jsonify({"error": "Interview not found."}), 404
+
+    from app.services.sarvam_service import SarvamService
+    sarvam_svc = SarvamService(llm_service=LLMService(provider=interview.llm_provider))
+
+    candidate_text = ""
+    time_in_call = 0
+
+    if request.is_json:
+        data = request.get_json() or {}
+        candidate_text = data.get("candidate_message", "").strip()
+        time_in_call = int(data.get("time_in_call_secs", 0))
+    elif "audio" in request.files or "file" in request.files:
+        audio_file = request.files.get("audio") or request.files.get("file")
+        time_in_call = int(request.form.get("time_in_call_secs", 0))
+        if audio_file:
+            audio_bytes = audio_file.read()
+            if audio_bytes and sarvam_svc.is_configured():
+                try:
+                    candidate_text = sarvam_svc.transcribe_audio(audio_bytes, filename=audio_file.filename or "audio.wav")
+                except Exception as te:
+                    print(f"[SarvamTurn] STT error: {te}")
+    else:
+        candidate_text = request.form.get("candidate_message", "").strip()
+        time_in_call = int(request.form.get("time_in_call_secs", 0))
+
+    if not candidate_text:
+        return jsonify({"error": "Candidate message or audio is required."}), 400
+
+    try:
+        result = sarvam_svc.generate_turn(interview, candidate_text, time_in_call_secs=time_in_call)
+        return jsonify({
+            "success": True,
+            "candidate_message": candidate_text,
+            **result
+        })
+    except Exception as e:
+        return jsonify({"error": f"Failed to generate Sarvam voice turn: {str(e)}"}), 500
+
+
+@api_bp.route("/interviews/<interview_id>/sarvam/tts", methods=["POST"])
+def sarvam_tts(interview_id: str):
+    """Synthesize custom speech text to audio using Sarvam TTS (Bulbul)."""
+    interview = get_or_restore_interview(interview_id)
+    if not interview:
+        return jsonify({"error": "Interview not found."}), 404
+
+    data = request.get_json(silent=True) or {}
+    text = data.get("text", "").strip()
+    if not text:
+        return jsonify({"error": "Text is required."}), 400
+
+    from app.services.sarvam_service import SarvamService
+    sarvam_svc = SarvamService()
+    try:
+        audio_b64 = sarvam_svc.synthesize_speech(text)
+        return jsonify({"success": True, "audio_base64": audio_b64})
+    except Exception as e:
+        return jsonify({"error": f"TTS synthesis failed: {str(e)}"}), 500
 
 
 @api_bp.route("/interviews/<interview_id>/context", methods=["GET"])
@@ -613,6 +722,9 @@ def finalize_interview(interview_id: str):
 
         if isinstance(interview, MongoInterview):
             interview.report = MongoInterviewReport(report.to_dict() if hasattr(report, "to_dict") else report)
+            interview.transcript = interview.transcript or []
+            interview.status = InterviewStatus.COMPLETED
+            interview.completed_at = datetime.now(timezone.utc)
             interview.save()
         else:
             db.session.commit()
@@ -620,11 +732,12 @@ def finalize_interview(interview_id: str):
                 try:
                     m_doc = MongoInterview.find_by_id(interview.id) or MongoInterview(interview.to_dict())
                     m_doc.report = MongoInterviewReport(report.to_dict() if hasattr(report, "to_dict") else report)
+                    m_doc.transcript = interview.transcript or []
                     m_doc.status = InterviewStatus.COMPLETED
                     m_doc.completed_at = interview.completed_at
                     m_doc.save()
                 except Exception as me:
-                    print(f"[API] Error saving report to Mongo: {me}")
+                    print(f"[API] Error saving report and transcript to Mongo: {me}")
 
         session["active_report"] = report.to_dict() if hasattr(report, "to_dict") else report
         session.modified = True

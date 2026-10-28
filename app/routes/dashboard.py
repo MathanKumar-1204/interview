@@ -53,6 +53,7 @@ def index():
         in_progress_count=in_progress_count,
         avg_score=avg_score,
         elevenlabs_ready=elevenlabs_ready,
+        sarvam_ready=Config.is_sarvam_configured(),
         llm_ready=llm_ready,
         gemini_ready=Config.is_provider_configured("gemini"),
         openai_ready=Config.is_provider_configured("openai"),

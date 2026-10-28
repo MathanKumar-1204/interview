@@ -84,6 +84,13 @@ class Config:
     OPENAI_REALTIME_MODEL = os.getenv("OPENAI_REALTIME_MODEL", "gpt-realtime-2.1").strip()
     OPENAI_REALTIME_VOICE = os.getenv("OPENAI_REALTIME_VOICE", "alloy").strip()
     
+    # Sarvam AI Voice Configuration
+    SARVAM_API_KEY = os.getenv("SARVAM_API_KEY", "").strip()
+    SARVAM_SPEAKER = os.getenv("SARVAM_SPEAKER", "meera").strip()
+    SARVAM_TTS_MODEL = os.getenv("SARVAM_TTS_MODEL", "bulbul:v3").strip()
+    SARVAM_LANGUAGE_CODE = os.getenv("SARVAM_LANGUAGE_CODE", "en-IN").strip()
+    SARVAM_STT_MODEL = os.getenv("SARVAM_STT_MODEL", "saaras:v4").strip()
+    
     # Auto-detect Gemini if key starts with AIza
     if LLM_API_KEY.startswith("AIza") and LLM_PROVIDER not in ("gemini", "mock"):
         LLM_PROVIDER = "gemini"
@@ -112,6 +119,10 @@ class Config:
     def is_openai_realtime_configured(cls) -> bool:
         key = cls.OPENAI_API_KEY or cls.LLM_API_KEY
         return bool(key and not key.startswith("your_") and not key.startswith("AIza"))
+
+    @classmethod
+    def is_sarvam_configured(cls) -> bool:
+        return bool(cls.SARVAM_API_KEY and not cls.SARVAM_API_KEY.startswith("your_"))
 
     @classmethod
     def is_mongo_configured(cls) -> bool:

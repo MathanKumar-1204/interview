@@ -12,6 +12,8 @@
           <span class="badge badge-emerald">♊ Gemini Flash Live</span>
         {% elif voice_engine == 'openai_realtime' %}
           <span class="badge badge-indigo">⚡ OpenAI Realtime WebRTC</span>
+        {% elif voice_engine == 'sarvam' %}
+          <span class="badge badge-emerald">🇮🇳 Sarvam AI Voice</span>
         {% else %}
           <span class="badge badge-indigo">🎙️ ElevenLabs AI</span>
         {% endif %}
@@ -206,9 +208,10 @@
   const configuredAgentId = "{{ agent_id }}";
   const voiceEngine = "{{ voice_engine }}";
   const isElevenLabsConfigured = {{ 'true' if elevenlabs_ready else 'false' }};
+  const isSarvamConfigured = {{ 'true' if sarvam_ready else 'false' }};
   const isGeminiLiveConfigured = {{ 'true' if gemini_live_ready else 'false' }};
   const isOpenaiRealtimeConfigured = {{ 'true' if openai_realtime_ready else 'false' }};
-  const isEngineConfigured = {{ 'true' if (elevenlabs_ready if voice_engine == 'elevenlabs' else openai_realtime_ready if voice_engine == 'openai_realtime' else gemini_live_ready) else 'false' }};
+  const isEngineConfigured = {{ 'true' if (elevenlabs_ready if voice_engine == 'elevenlabs' else openai_realtime_ready if voice_engine == 'openai_realtime' else sarvam_ready if voice_engine == 'sarvam' else gemini_live_ready) else 'false' }};
 </script>
 <script type="module" src="{{ url_for('static', filename='js/live_interview.js') }}"></script>
 {% endblock %}

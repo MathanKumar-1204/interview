@@ -20,6 +20,7 @@ def new_interview():
     return render_template(
         "interview_setup.html",
         elevenlabs_ready=elevenlabs_ready,
+        sarvam_ready=Config.is_sarvam_configured(),
         llm_ready=llm_ready,
         gemini_ready=Config.is_provider_configured("gemini"),
         openai_ready=Config.is_provider_configured("openai"),
@@ -46,6 +47,7 @@ def view_preparation(interview_id: str):
         interview=interview,
         plan=interview.interview_plan or {},
         elevenlabs_ready=Config.is_elevenlabs_configured(),
+        sarvam_ready=Config.is_sarvam_configured(),
         gemini_live_ready=Config.is_gemini_live_configured(),
         openai_realtime_ready=Config.is_openai_realtime_configured(),
         voice_engine=interview.voice_engine,
@@ -67,6 +69,7 @@ def live_interview(interview_id: str):
         return redirect(url_for("reports.view_report", interview_id=interview.id))
 
     elevenlabs_ready = Config.is_elevenlabs_configured()
+    sarvam_ready = Config.is_sarvam_configured()
     gemini_live_ready = Config.is_gemini_live_configured()
     openai_realtime_ready = Config.is_openai_realtime_configured()
     auth_mode = Config.ELEVENLABS_AUTH_MODE
@@ -76,6 +79,7 @@ def live_interview(interview_id: str):
         "live_interview.html",
         interview=interview,
         elevenlabs_ready=elevenlabs_ready,
+        sarvam_ready=sarvam_ready,
         gemini_live_ready=gemini_live_ready,
         openai_realtime_ready=openai_realtime_ready,
         voice_engine=interview.voice_engine,
