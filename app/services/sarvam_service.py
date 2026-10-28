@@ -71,8 +71,30 @@ class SarvamService:
 
     def get_sarvam_system_prompt(self, interview: Any) -> str:
         """Construct tailored system instructions for Sarvam AI Voice Agent."""
-        with open(PROMPT_FILE, "r", encoding="utf-8") as f:
-            template = f.read()
+        template = ""
+        try:
+            if PROMPT_FILE.exists():
+                with open(PROMPT_FILE, "r", encoding="utf-8") as f:
+                    template = f.read()
+        except Exception as fe:
+            print(f"[SarvamService] Prompt file read warning: {fe}", flush=True)
+
+        if not template:
+            template = (
+                "You are Alex, an elite, professional, and discerning executive interviewer conducting a live spoken evaluation "
+                "with {{candidate_name}} for the {{job_title}} position.\n\n"
+                "TARGET ROLE & CANDIDATE CONTEXT:\n"
+                "- Candidate Name: {{candidate_name}}\n"
+                "- Target Job Title: {{job_title}}\n"
+                "- Employer & Role Requirements from JD:\n{{company_requirements}}\n"
+                "- Candidate Profile & Resume:\n{{candidate_details}}\n"
+                "- Pre-Planned Questions:\n{{planned_questions}}\n\n"
+                "CRITICAL VOICE INTERVIEW RULES:\n"
+                "1. NEVER repeat, rephrase, or parrot back what the candidate just said.\n"
+                "2. Acknowledge with a brief conversational filler: 'Hmm, ok.', 'Got it.', 'Understood.', 'Makes sense.'.\n"
+                "3. Ask ONE targeted, discerning follow-up question probing for individual ownership, concrete metrics, or domain technical depth.\n"
+                "4. Keep your response spoken, concise, and professional (1-2 sentences max).\n"
+            )
 
         dyn = build_interview_dynamic_variables(interview)
         prompt = template
@@ -257,7 +279,8 @@ class SarvamService:
             alex_reply = self.llm.generate_text(system_prompt, user_prompt, max_tokens=180, temperature=0.7)
             alex_clean = self._clean_llm_speech(alex_reply)
         except Exception as e:
-            alex_clean = "Got it. Can you walk me through your personal contribution to that project?"
+            print(f"[SarvamService] Turn generation notice (fallback engaged): {e}", flush=True)
+            alex_clean = self._get_fallback_question(interview, candidate_text, len(transcript))
 
         transcript.append({
             "role": "interviewer",
@@ -272,7 +295,7 @@ class SarvamService:
             try:
                 audio_b64 = self.synthesize_speech(alex_clean)
             except Exception as te:
-                print(f"[SarvamService] TTS synthesis warning: {te}")
+                print(f"[SarvamService] TTS synthesis warning: {te}", flush=True)
 
         # Real-time MongoDB persistence
         self._persist_to_mongo(interview)
@@ -283,6 +306,35 @@ class SarvamService:
             "transcript": transcript,
             "turn_count": len(transcript)
         }
+
+    def _get_fallback_question(self, interview: Any, candidate_message: str, turn_count: int) -> str:
+        """Dynamic, context-aware fallback questions so turns never repeat the same line."""
+        # 1. Pull next pre-planned question from the interview's actual generated plan
+        plan = getattr(interview, "interview_plan", None) or {}
+        sections = plan.get("sections", []) if isinstance(plan, dict) else []
+        planned_questions = []
+        for sec in sections:
+            for q in sec.get("questions", []):
+                q_text = q.get("question_text", "").strip()
+                if q_text:
+                    planned_questions.append(q_text)
+
+        # Candidate turn index
+        q_idx = max(0, (turn_count // 2) - 1)
+        if planned_questions and q_idx < len(planned_questions):
+            fillers = ["Got it.", "Understood.", "Makes sense.", "Hmm, ok."]
+            filler = fillers[q_idx % len(fillers)]
+            return f"{filler} {planned_questions[q_idx]}"
+
+        # 2. Rotating domain questions
+        rotations = [
+            "Got it. Can you walk me through your personal contribution to that project?",
+            "Understood. Could you share a challenging technical hurdle you faced in that work and how you resolved it?",
+            "Makes sense. What measurable outcomes or key metrics did you achieve from that effort?",
+            "Hmm, ok. How did you collaborate with teammates or cross-functional stakeholders on that initiative?",
+            "Got it. If you were to approach that project or problem again today, what would you do differently?"
+        ]
+        return rotations[turn_count % len(rotations)]
 
     def _persist_to_mongo(self, interview: Any) -> None:
         """Helper to reliably persist transcript changes to MongoDB."""
@@ -297,15 +349,40 @@ class SarvamService:
                     m_doc.status = interview.status
                     m_doc.save()
         except Exception as me:
-            print(f"[SarvamService] Mongo sync error: {me}")
+            print(f"[SarvamService] Mongo sync error: {me}", flush=True)
 
     @staticmethod
     def _clean_llm_speech(raw: str) -> str:
         """Strip markdown, json artifacts, and prefix labels like 'Alex:'."""
         cleaned = raw.strip()
+
+        # 1. Strip common prefixes like 'Alex:', 'Interviewer:', 'Response:'
         for prefix in ("Alex:", "Interviewer:", "AI:", "Response:"):
             if cleaned.lower().startswith(prefix.lower()):
                 cleaned = cleaned[len(prefix):].strip()
-        if (cleaned.startswith('"') and cleaned.endsWith('"')) or (cleaned.startswith("'") and cleaned.endswith("'")):
+
+        # 2. Remove markdown code fences if present
+        if cleaned.startswith("```"):
+            import re
+            m = re.search(r"^```(?:json)?\s*\n?(.*?)\n?```$", cleaned, re.DOTALL)
+            if m:
+                cleaned = m.group(1).strip()
+            else:
+                cleaned = cleaned.replace("```json", "").replace("```", "").strip()
+
+        # 3. Unpack JSON if returned as a JSON object
+        if (cleaned.startswith("{") and cleaned.endswith("}")) or ('"response"' in cleaned or '"message"' in cleaned):
+            try:
+                parsed = json.loads(cleaned)
+                for key in ("response", "message", "text", "speech", "content"):
+                    if key in parsed and isinstance(parsed[key], str):
+                        cleaned = parsed[key].strip()
+                        break
+            except Exception:
+                pass
+
+        # 4. Strip surrounding single or double quotes
+        if (cleaned.startswith('"') and cleaned.endswith('"')) or (cleaned.startswith("'") and cleaned.endswith("'")):
             cleaned = cleaned[1:-1].strip()
+
         return cleaned

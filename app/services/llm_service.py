@@ -117,8 +117,8 @@ class LLMService:
         payload: Dict[str, Any] = {
             "model": model,
             "messages": messages,
-            "temperature": 0.2,
-            "max_tokens": 4000,
+            "temperature": 0.2 if json_mode else 0.7,
+            "max_tokens": 4000 if json_mode else 500,
         }
         if json_mode:
             payload["response_format"] = {"type": "json_object"}
@@ -313,6 +313,85 @@ class LLMService:
                 raise LLMExecutionError(f"Gemini API call failed: {err_str}")
 
         raise LLMExecutionError(f"Gemini API call failed across candidate models {candidate_models}: {last_error}")
+
+    def generate_text(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        max_tokens: int = 250,
+        temperature: float = 0.7
+    ) -> str:
+        """
+        Generate conversational spoken text using the configured LLM provider (Gemini, OpenAI, Claude, or Mock).
+        Returns plain conversational spoken text (not JSON).
+        Resilient: if the primary provider encounters an issue (e.g. rate limit), falls back to alternate configured providers.
+        """
+        if self.provider == "mock":
+            return "Got it. Can you tell me more about your recent experience and the technologies you used?"
+
+        providers_to_try = [self.provider]
+        for alt in ("gemini", "openai", "claude"):
+            if alt not in providers_to_try:
+                providers_to_try.append(alt)
+
+        last_error = None
+        for prov in providers_to_try:
+            try:
+                if prov == "gemini":
+                    key = self.api_key if self.provider == "gemini" and self.api_key else (
+                        (current_app.config.get("GEMINI_API_KEY") if has_app_context() else Config.GEMINI_API_KEY)
+                        or (Config.LLM_API_KEY if Config.LLM_API_KEY and Config.LLM_API_KEY.startswith("AIza") else "")
+                    )
+                    if not key or key.startswith("your_"):
+                        continue
+                    orig_prov, orig_key = self.provider, self.api_key
+                    self.provider, self.api_key = "gemini", key
+                    try:
+                        raw = self._call_gemini(system_prompt, user_prompt, json_mode=False)
+                        if raw and raw.strip():
+                            return raw.strip()
+                    finally:
+                        self.provider, self.api_key = orig_prov, orig_key
+
+                elif prov == "openai":
+                    key = self.api_key if self.provider == "openai" and self.api_key else (
+                        (current_app.config.get("OPENAI_API_KEY") if has_app_context() else Config.OPENAI_API_KEY)
+                        or (Config.LLM_API_KEY if Config.LLM_API_KEY and not Config.LLM_API_KEY.startswith("AIza") else "")
+                    )
+                    if not key or key.startswith("your_"):
+                        continue
+                    orig_prov, orig_key = self.provider, self.api_key
+                    self.provider, self.api_key = "openai", key
+                    try:
+                        raw = self._call_openai(system_prompt, user_prompt, json_mode=False)
+                        if raw and raw.strip():
+                            return raw.strip()
+                    finally:
+                        self.provider, self.api_key = orig_prov, orig_key
+
+                elif prov == "claude":
+                    key = self.api_key if self.provider == "claude" and self.api_key else (
+                        (current_app.config.get("ANTHROPIC_API_KEY") if has_app_context() else Config.ANTHROPIC_API_KEY)
+                    )
+                    if not key or key.startswith("your_"):
+                        continue
+                    orig_prov, orig_key = self.provider, self.api_key
+                    self.provider, self.api_key = "claude", key
+                    try:
+                        raw = self._call_claude(system_prompt, user_prompt)
+                        if raw and raw.strip():
+                            return raw.strip()
+                    finally:
+                        self.provider, self.api_key = orig_prov, orig_key
+
+            except Exception as e:
+                last_error = e
+                print(f"[LLMService] generate_text provider '{prov}' notice: {e}", flush=True)
+
+        if last_error:
+            raise last_error
+
+        raise LLMConfigError("No valid LLM provider credentials configured.")
 
     def generate_json(self, system_prompt: str, user_prompt: str, response_model: Type[T]) -> T:
         """Call LLM (Gemini, OpenAI, or Mock) and parse the response into the specified Pydantic model."""
